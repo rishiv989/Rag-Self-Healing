@@ -1,0 +1,21 @@
+# Python Virtual Environment
+venv/
+__pycache__/
+*.pyc
+
+# Database and Persistence
+chroma_db/
+Data/
+
+# Logs and Scratch Files
+logs/
+*.log
+fix.py
+scratch_fix.py
+
+# Frontend dependencies and builds
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+.env
+.DS_Store
