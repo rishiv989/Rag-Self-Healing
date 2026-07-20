@@ -247,8 +247,7 @@ async def reflect(state: AgentState):
     else:
         final_answer = draft_answer
 
-    global_state.chat_history.append({"user": query, "assistant": final_answer})
-    global_state.save_session()
+    global_state.save_message(query, final_answer)
     store_in_cache(query, final_answer, state["sources"])
 
     await queue.put("data: [DONE]\n\n")
@@ -280,8 +279,7 @@ async def web_search_fallback(state: AgentState):
             await generate_sse(queue, "chunk", text=chunk)
             
         final_answer = "".join(draft_chunks)
-        global_state.chat_history.append({"user": query, "assistant": final_answer})
-        global_state.save_session()
+        global_state.save_message(query, final_answer)
         store_in_cache(query, final_answer, sources)
         
     except Exception as e:

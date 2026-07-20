@@ -1,108 +1,85 @@
-# 🧠 Synapse AI: Self-Healing Agentic RAG
+# 🧠 Synapse AI: The Smart, Self-Correcting Chatbot
 
-Synapse AI is an enterprise-grade, **Self-Healing Retrieval-Augmented Generation (RAG)** application. Powered by **LangGraph**, **FastAPI**, and a **React (Vite)** frontend, it represents the bleeding edge of local AI architectures. 
+Synapse AI is a highly advanced, local AI chatbot built to read your documents and answer questions about them. 
 
-Instead of a traditional linear RAG pipeline, Synapse uses a dynamic **State Machine**. If it retrieves poor context, it doesn't just hallucinate an answer—it actively "heals" itself by altering its search strategy, reranking documents, or autonomously pivoting to scrape the live web.
-
----
-
-## ✨ Cutting-Edge Features
-
-- **🕸️ LangGraph Orchestration**: A recursive state machine that intelligently routes data through nodes (`Analyze` → `Retrieve` → `Self Heal` → `Generate` → `Reflect`).
-- **⚡ Asynchronous Token Streaming**: Real-time "typing" experience powered by Server-Sent Events (SSE).
-- **🔎 Agentic Web Search Fallback**: If local PDFs lack the answer, the agent autonomously searches the live internet (via DuckDuckGo) and cites live URLs.
-- **🧬 Semantic Chunking**: Ingestion pipeline reads sentence by sentence, splitting documents precisely on semantic topic shifts using embedding distances.
-- **💾 Semantic Caching & Memory**: Bypasses expensive LLM inference for repeated questions and maintains persistent entity/conversation memory across server restarts.
-- **📊 On-The-Fly GraphRAG**: Rapidly extracts Knowledge Graph triplets (`Entity` → `Relationship` → `Entity`) in real-time to grant the LLM superhuman multi-hop reasoning capabilities.
-- **🖱️ Dynamic Drag-and-Drop Ingestion**: Upload PDFs directly from the UI to hot-swap the vector database with zero server downtime.
-- **👁️ Visual Node Inspector**: A beautiful React sidebar that lights up in real-time to show you exactly which node the agent is currently "thinking" in.
+Unlike basic AI bots that guess or make things up (hallucinate) when they don't know the answer, Synapse AI acts like a smart researcher. It thinks step-by-step. If it searches your document and realizes it didn't find a good answer, it stops, fixes its search strategy, tries again, or even searches the live internet to find the truth!
 
 ---
 
-## 🛠️ Tech Stack
+## ✨ What Makes It Special?
 
-- **Backend / Orchestration**: FastAPI, LangGraph, LangChain, Pydantic
-- **AI / Embeddings**: Ollama (`llama3.2`, `mxbai-embed-large`)
-- **Vector Database**: ChromaDB (SQLite local persistence)
-- **Frontend**: React.js (Vite), CSS3 Glassmorphism
+- **🧠 A "Thinking" Brain (LangGraph)**: Instead of a straight line, this AI uses a flowchart. It loops through steps like `Analyze` → `Search` → `Check for Mistakes` → `Generate Answer` → `Double Check`.
+- **⚡ Super Fast Typing (Streaming)**: It types out answers in real-time so you never have to wait staring at a loading screen.
+- **🌐 Automatic Web Search**: If your uploaded PDF doesn't have the answer to your question, the AI realizes this and automatically searches DuckDuckGo to get live results from the internet!
+- **📖 Smart Reading (Semantic Chunking)**: When you upload a document, it reads it sentence-by-sentence and groups related topics together, rather than just chopping pages in half.
+- **🐘 Elephant Memory**: If you ask it a question it has already answered before, it replies instantly from memory without having to think again.
+- **🕵️ Detective Logic (GraphRAG)**: It automatically connects the dots. If you ask a tricky question, it builds a mini "mind map" of the characters or topics in your document to figure out how they are connected before answering.
+- **🖱️ Easy Drag-and-Drop**: You don't need to be a coder to add files. Just click the paperclip icon in the chat to upload a new PDF!
+- **👁️ Watch It Think**: A cool sidebar next to the chat lights up in real-time, showing you exactly what step the AI's brain is currently working on.
 
 ---
 
-## 🚀 Getting Started
+## 🛠️ Built With
 
-### 1. Prerequisites
-Ensure you have the following installed:
-- Python 3.10+
-- Node.js 18+
-- [Ollama](https://ollama.ai/) installed and running locally.
+- **Backend (The Brain)**: Python, FastAPI, LangGraph
+- **AI Models**: Ollama (Running locally and privately on your machine)
+- **Database**: ChromaDB
+- **Frontend (The Look)**: React.js (Vite)
 
-Pull the required local models:
+---
+
+## 🚀 How to Run It on Your Computer
+
+### 1. What You Need First
+Make sure you have downloaded and installed:
+- Python (version 3.10 or newer)
+- Node.js (version 18 or newer)
+- [Ollama](https://ollama.ai/) (This runs the AI models locally)
+
+Open your terminal and download the required AI models by typing:
 ```bash
 ollama run llama3.2
 ollama pull mxbai-embed-large
 ```
 
-### 2. Backend Setup
-Clone the repository and set up your Python virtual environment:
-```bash
-git clone https://github.com/YOUR_USERNAME/synapse-ai-rag.git
-cd synapse-ai-rag
+### 2. Start the Backend (The Server)
+Open your terminal, go to the project folder, and run these commands to set up Python:
 
-# Create and activate virtual environment
+```bash
+# Create a virtual environment
 python -m venv venv
-# Windows:
+
+# Turn it on (Windows)
 .\venv\Scripts\activate
-# Mac/Linux:
+# Turn it on (Mac/Linux)
 source venv/bin/activate
 
-# Install dependencies
+# Install the required tools
 pip install -r requirements.txt
-```
 
-Start the FastAPI server:
-```bash
+# Start the server!
 uvicorn src.app:app --reload
 ```
 
-### 3. Frontend Setup
-Open a new terminal window:
+### 3. Start the Frontend (The Web Interface)
+Open a **new** terminal window, go to the project folder, and run:
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-The UI will be available at `http://localhost:5173`. 
+Finally, open your web browser and go to: `http://localhost:5173`
 
 ---
 
-## 🎯 Usage
+## 🎯 How to Use It
 
-1. **Ingest a Document**: Click the paperclip icon in the chat input bar to upload a PDF. Watch the progress toast as the backend mathematically chunks the semantics.
-2. **Ask Questions**: Ask questions based on your document. Watch the LangGraph Inspector sidebar to see the agent flow from `Retrieve` to `Generate`.
-3. **Trigger Web Fallback**: Ask a question outside the scope of your document (e.g., "What is the latest AI news?") and watch the state machine gracefully fall back to `web_search_fallback`!
-
----
-
-## 🏗️ Architecture
-
-```mermaid
-graph TD
-    A[Analyze Query] --> B{Cache/Memory Hit?}
-    B -- Yes --> END
-    B -- No --> C[Retrieve & Rerank]
-    C --> D{Confident?}
-    D -- No --> E[Self Heal Loop]
-    E -->|Refuse/Fail| F[Web Search Fallback]
-    D -- Yes --> G[Build Knowledge Graph]
-    E -- Success --> G
-    F --> END
-    G --> H[Generate Draft]
-    H --> I[Reflect & Auto-Correct]
-    I --> END
-```
+1. **Upload a File**: Click the paperclip icon next to the chat box and upload a PDF. Wait a moment for the AI to read and process it.
+2. **Ask a Question**: Type a question about your document. Look at the right sidebar to watch the AI's brain light up as it searches and thinks!
+3. **Test the Internet Fallback**: Try asking a question that is *definitely not* in your document (like "What is the weather today?"). Watch how the AI realizes it doesn't know, and automatically switches to searching the web!
 
 ---
 
 ## 📜 License
-MIT License - Free to use, modify, and distribute.
+Free to use, modify, and learn from!
