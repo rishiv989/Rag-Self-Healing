@@ -2,6 +2,8 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import os
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import asyncio
 import gc
 
