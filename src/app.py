@@ -38,7 +38,7 @@ app.add_middleware(
 
 
 # ─────────────────────────────────────────────
-# HEALTH
+# HEALTH & SYSTEM STATUS
 # ─────────────────────────────────────────────
 
 @app.get("/health", response_model=HealthResponse, tags=["System"])
@@ -48,24 +48,23 @@ def health():
 
 @app.get("/system/status", response_model=SystemStatusResponse, tags=["System"])
 def system_status():
-    """Returns the current runtime state of the RAG system."""
-    from src.rag_engine import initialize_system
-    initialize_system()
-
-    docs_count = len(global_state.ALL_DOCS)
+    """Returns the current runtime state of the RAG system instantly without blocking on model downloads."""
     ingested = list_ingested_documents()
+    docs_count = sum(d["chunk_count"] for d in ingested)
 
     llm_name = "llama3.2 (Ollama)"
     if os.environ.get("GROQ_API_KEY"):
         llm_name = f"{os.environ.get('GROQ_MODEL', 'llama-3.3-70b-versatile')} (Groq Cloud)"
 
+    vectorstore_exists = os.path.exists("chroma_db")
+
     return {
         "status": "ok",
         "total_chunks": docs_count,
-        "bm25_ready": global_state.bm25 is not None,
-        "vectorstore_ready": global_state.vectorstore is not None,
+        "bm25_ready": global_state.bm25 is not None or vectorstore_exists,
+        "vectorstore_ready": global_state.vectorstore is not None or vectorstore_exists,
         "llm_model": llm_name,
-        "embedding_model": "mxbai-embed-large",
+        "embedding_model": "all-MiniLM-L6-v2 (Cloud)" if os.environ.get("GROQ_API_KEY") else "mxbai-embed-large (Local)",
         "documents_ingested": len(ingested),
     }
 
@@ -156,7 +155,6 @@ def delete_document(doc_name: str):
     try:
         success = delete_document_collection(doc_name)
         if success:
-            # Refresh global state
             if global_state.vectorstore:
                 db = global_state.vectorstore.get()
                 global_state.ALL_DOCS = db["documents"]
