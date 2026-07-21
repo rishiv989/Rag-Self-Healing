@@ -10,26 +10,25 @@ DATA_DIR = "Data"
 def _get_embeddings():
     """
     Returns embedding model:
-    - In Cloud Mode (GROQ_API_KEY set), uses zero-CPU / zero-RAM Hugging Face Inference API embeddings.
-    - Falls back to FastEmbed (1-thread) or Ollama in local mode.
+    - Uses Hugging Face API if a valid HF_TOKEN is configured in environment variables.
+    - Uses 1-thread FastEmbedEmbeddings locally or in cloud mode when no HF token is supplied.
     """
-    has_groq = bool(os.environ.get("GROQ_API_KEY"))
-
-    if has_groq:
+    hf_token = os.environ.get("HF_TOKEN")
+    if hf_token:
         try:
             from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
-            hf_token = os.environ.get("HF_TOKEN", "hf_qWRvKjGzXFpLBsTmDfYhNvC")
             return HuggingFaceInferenceAPIEmbeddings(
                 api_key=hf_token,
                 model_name="sentence-transformers/all-MiniLM-L6-v2"
             )
         except Exception as e:
             print(f"[embedder] HF API Error: {e}")
-            try:
-                from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
-                return FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5", threads=1)
-            except Exception:
-                pass
+
+    try:
+        from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+        return FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5", threads=1)
+    except Exception as e:
+        print(f"[embedder] FastEmbedEmbeddings error: {e}")
 
     try:
         from langchain_ollama import OllamaEmbeddings
