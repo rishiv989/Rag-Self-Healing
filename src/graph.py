@@ -13,7 +13,6 @@ from src.generation import generate_memory_answer_stream, generate_answer_stream
 from src.failure_logger import log_failure
 from src.failure_analytics import pretty_failure_report
 from src.adaptive_healing import adaptive_decision
-from ddgs import DDGS
 
 MAX_HEAL_ATTEMPTS = 2
 
@@ -259,36 +258,11 @@ async def reflect(state: AgentState):
     return {"final_answer": final_answer, "is_terminal": True}
 
 async def web_search_fallback(state: AgentState):
-    query = state["query"]
     queue = state["queue"]
     heal_attempts = state.get("heal_attempts", 0)
     await generate_sse(queue, "node", current_node="web_search_fallback")
-
-    await generate_sse(queue, "metadata", strategy="WEB_SEARCH", heals=heal_attempts, confidence=0.0, sources=["DuckDuckGo Search"])
-    await generate_sse(queue, "chunk", text="*Searching the live web...*\n\n")
-
-    try:
-        results = DDGS().text(query, max_results=3)
-        if not results:
-            await generate_sse(queue, "chunk", text="I could not find any relevant information in your documents or on the web.")
-            await queue.put("data: [DONE]\n\n")
-            return {"is_terminal": True}
-
-        context = "\n\n".join([f"Source: {res['href']}\nSnippet: {res['body']}" for res in results])
-        sources = [res['href'] for res in results]
-        
-        draft_chunks = []
-        async for chunk in generate_answer_stream(context, query):
-            draft_chunks.append(chunk)
-            await generate_sse(queue, "chunk", text=chunk)
-            
-        final_answer = "".join(draft_chunks)
-        global_state.save_message(query, final_answer)
-        store_in_cache(query, final_answer, sources)
-        
-    except Exception as e:
-        await generate_sse(queue, "chunk", text=f"Web search failed: {str(e)}")
-        
+    await generate_sse(queue, "metadata", strategy="NO_RESULTS", heals=heal_attempts, confidence=0.0, sources=[])
+    await generate_sse(queue, "chunk", text="I could not find relevant information in the uploaded documents. Please upload a document first, then ask your question.")
     await queue.put("data: [DONE]\n\n")
     return {"is_terminal": True}
 
@@ -347,7 +321,7 @@ rag_graph = builder.compile()
 async def run_langgraph_stream(query: str):
     queue = asyncio.Queue()
     # Flush HTTP 200 OK response headers immediately (<1ms) to bypass Render 30s proxy timeout
-    await queue.put({"type": "node", "current_node": "analyze_query"})
+    await queue.put(f"data: {json.dumps({'type': 'node', 'current_node': 'analyze_query'})}\n\n")
 
     async def process_graph():
         if global_state.llm is None or global_state.vectorstore is None:
