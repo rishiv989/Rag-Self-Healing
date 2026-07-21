@@ -105,6 +105,19 @@ def system_status():
 # CHAT
 # ─────────────────────────────────────────────
 
+@app.get("/ask-debug", tags=["Debug"])
+async def ask_debug():
+    """Minimal SSE test: no app logic, just 2 static chunks. Tests if streaming works on Render."""
+    async def _gen():
+        yield "data: {\"type\": \"chunk\", \"text\": \"SSE streaming works!\"}\n\n"
+        yield "data: [DONE]\n\n"
+    return StreamingResponse(
+        _gen(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache", "Connection": "keep-alive"}
+    )
+
+
 @app.post("/ask", tags=["Chat"])
 async def ask(request: QuestionRequest):
     """Stream a response for a given question using the self-healing RAG pipeline."""
