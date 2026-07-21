@@ -1,6 +1,10 @@
+import os
+
+
 class HealingPolicy:
-    def __init__(self, strong_threshold=5.0):
-        self.strong_threshold = strong_threshold
+    def __init__(self, strong_threshold=None):
+        is_cloud = bool(os.environ.get("GROQ_API_KEY"))
+        self.strong_threshold = 0.5 if is_cloud else (strong_threshold or 5.0)
 
     def decide(
         self,
@@ -13,7 +17,6 @@ class HealingPolicy:
             return "REFUSE"
 
         best_score = ranked_docs[0][1]
-
         original_lower = original_query.lower()
 
         pronouns = [
@@ -31,11 +34,9 @@ class HealingPolicy:
             for p in pronouns
         )
 
-        # pronoun but no entity context
         if has_pronoun and not current_entity:
             return "CLARIFY"
 
-        # pronoun with known entity
         if has_pronoun and current_entity:
             return "REWRITE"
 
