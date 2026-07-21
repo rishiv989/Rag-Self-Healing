@@ -81,6 +81,7 @@ def initialize_system():
 
 async def ask_question_stream(query):
     # Yield FIRST — flushes HTTP 200 + headers to nginx immediately (<1ms)
+    # Also lights up the first pipeline node in the frontend.
     yield f"data: {json.dumps({'type': 'node', 'current_node': 'analyze_query'})}\n\n"
 
     try:
@@ -99,6 +100,9 @@ async def ask_question_stream(query):
             yield "data: [DONE]\n\n"
             return
 
+        # ── Check Fast Memory ──────────────────────────────────────────────
+        yield f"data: {json.dumps({'type': 'node', 'current_node': 'check_fast_memory'})}\n\n"
+
         from src.semantic_cache import check_cache, store_in_cache
         cache_hit = check_cache(query)
         if cache_hit and cache_hit.get('answer'):
@@ -108,7 +112,7 @@ async def ask_question_stream(query):
             return
 
         store_mentions(query)
-        
+
         from src.query_processor import extract_entities
         if extract_entities(query):
             store_valid_entities(query)
@@ -139,15 +143,23 @@ async def ask_question_stream(query):
                 yield "data: [DONE]\n\n"
                 return
 
+        # ── Retrieve And Rerank ────────────────────────────────────────────
+        yield f"data: {json.dumps({'type': 'node', 'current_node': 'retrieve_and_rerank'})}\n\n"
+
         docs = await retrieve_documents(search_query)
 
         if not docs:
+            # ── Web Search Fallback (no docs) ──────────────────────────────
+            yield f"data: {json.dumps({'type': 'node', 'current_node': 'web_search_fallback'})}\n\n"
             yield "data: " + json.dumps({'type': 'metadata', 'strategy': 'REFUSE', 'heals': 0, 'confidence': 0.0, 'sources': []}) + "\n\n"
             yield "data: " + json.dumps({'type': 'chunk', 'text': 'No relevant documents found. Please upload a document first.'}) + "\n\n"
             yield "data: [DONE]\n\n"
             return
 
         ranked_docs = state.reranker.rerank(search_query, docs, top_k=3)
+
+        # ── Self Heal ──────────────────────────────────────────────────────
+        yield f"data: {json.dumps({'type': 'node', 'current_node': 'self_heal'})}\n\n"
 
         low_confidence = not state.confidence_checker.is_confident(ranked_docs)
         heal_attempts = 0
@@ -178,7 +190,7 @@ async def ask_question_stream(query):
 
         top_docs = [doc for doc, _ in ranked_docs]
         context = "\n\n".join(doc.page_content for doc in top_docs)
-        
+
         confidence = ranked_docs[0][1] if ranked_docs else 0.0
         if hasattr(confidence, "item"):
             confidence = float(confidence.item())
@@ -195,14 +207,23 @@ async def ask_question_stream(query):
                 sources.append(source_name)
         unique_sources = list(dict.fromkeys(sources))
 
+        # ── Build Knowledge Graph ──────────────────────────────────────────
+        yield f"data: {json.dumps({'type': 'node', 'current_node': 'build_knowledge_graph'})}\n\n"
+
         yield "data: " + json.dumps({'type': 'metadata', 'strategy': strategy, 'heals': heal_attempts, 'confidence': confidence, 'sources': unique_sources}) + "\n\n"
+
+        # ── Generate Draft ─────────────────────────────────────────────────
+        yield f"data: {json.dumps({'type': 'node', 'current_node': 'generate_draft'})}\n\n"
 
         draft_chunks = []
         async for chunk in generate_answer_stream(context, query):
             draft_chunks.append(chunk)
             yield "data: " + json.dumps({'type': 'chunk', 'text': chunk}) + "\n\n"
-            
+
         draft_answer = "".join(draft_chunks)
+
+        # ── Reflect ────────────────────────────────────────────────────────
+        yield f"data: {json.dumps({'type': 'node', 'current_node': 'reflect'})}\n\n"
 
         decision = await state.reflection_agent.decide_async(
             query=query,
