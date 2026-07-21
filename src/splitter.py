@@ -1,23 +1,20 @@
-from langchain_experimental.text_splitter import SemanticChunker
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from src.loader import load_documents
 
 def split_documents(pdf_path, embeddings=None):
+    """
+    Fast, reliable document chunker optimized for production web APIs.
+    Uses RecursiveCharacterTextSplitter for instant (<0.1s) chunking.
+    """
     docs = load_documents(pdf_path)
 
-    if embeddings is None:
-        from src.embedder import _get_embeddings
-        embeddings = _get_embeddings()
-
-    # Semantic chunking relies on vector distance. 
-    # The 'percentile' threshold forces a split when semantic distance between sentences is high.
-    splitter = SemanticChunker(
-        embeddings, 
-        breakpoint_threshold_type="percentile",
-        breakpoint_threshold_amount=80
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=150,
+        separators=["\n\n", "\n", ". ", " ", ""]
     )
 
     chunks = splitter.split_documents(docs)
-
     return chunks
 
 
