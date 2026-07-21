@@ -1,6 +1,7 @@
 from typing import TypedDict, List, Any
 import asyncio
 import json
+import os
 from langgraph.graph import StateGraph, END
 
 import src.state as global_state
@@ -50,12 +51,10 @@ async def analyze_query(state: AgentState):
         await queue.put("data: [DONE]\n\n")
         return {"is_terminal": True}
 
-    # 1. Store mentions
     store_mentions(query)
     if extract_entities(query):
         store_valid_entities(query)
 
-    # 2. Resolve pronoun
     search_query = resolve_query(query, get_latest_entity())
 
     if search_query is None:
@@ -80,7 +79,6 @@ async def check_fast_memory(state: AgentState):
     queue = state["queue"]
     await generate_sse(queue, "node", current_node="check_fast_memory")
 
-    # Check cache
     cache_hit = check_cache(query)
     if cache_hit:
         await generate_sse(queue, "metadata", strategy="CACHE", heals=0, confidence=1.0, sources=cache_hit['sources'])
@@ -88,7 +86,6 @@ async def check_fast_memory(state: AgentState):
         await queue.put("data: [DONE]\n\n")
         return {"is_terminal": True}
 
-    # Check memory
     if memory_relevant(search_query):
         await generate_sse(queue, "metadata", strategy="MEMORY", heals=0, confidence=1.0, sources=["Conversation Memory"])
         ans = ""
@@ -134,10 +131,8 @@ async def self_heal(state: AgentState):
     is_conf = global_state.confidence_checker.is_confident(ranked_docs, retry=(heal_attempts > 0))
     
     if is_conf or heal_attempts >= MAX_HEAL_ATTEMPTS:
-        # Proceed to generation
         return {}
 
-    # Heal needed
     heal_attempts += 1
     base_strategy = global_state.healing_policy.decide(ranked_docs, query, search_query, get_latest_entity())
     strategy = adaptive_decision(base_strategy)
@@ -164,6 +159,11 @@ async def build_knowledge_graph(state: AgentState):
     queue = state["queue"]
     
     await generate_sse(queue, "node", current_node="build_knowledge_graph")
+    
+    # In cloud mode (Render 30s timeout constraint), skip heavy separate graph extraction LLM call
+    if os.environ.get("GROQ_API_KEY"):
+        return {"graph_context": ""}
+
     await generate_sse(queue, "chunk", text="\n\n*[GraphRAG] Extracting Knowledge Graph...*\n")
     
     top_docs = [doc for doc, _ in ranked_docs]
@@ -179,11 +179,14 @@ Text:
 """
     
     graph_context = ""
-    async for chunk in global_state.llm.astream(prompt):
-        graph_context += chunk.content
-        
-    await generate_sse(queue, "chunk", text=graph_context + "\n\n")
-    
+    try:
+        async for chunk in global_state.llm.astream(prompt):
+            graph_context += chunk.content
+        await generate_sse(queue, "chunk", text=graph_context + "\n\n")
+    except Exception as e:
+        print(f"[graph] build_knowledge_graph error: {e}")
+        graph_context = ""
+
     return {"graph_context": graph_context}
 
 async def generate_draft(state: AgentState):
@@ -211,7 +214,7 @@ async def generate_draft(state: AgentState):
             sources.append(source_name)
     unique_sources = list(dict.fromkeys(sources))
 
-    await generate_sse(queue, "metadata", strategy=state["strategy"], heals=state["heal_attempts"], confidence=state["confidence"], sources=unique_sources)
+    await generate_sse(queue, "metadata", strategy=state.get("strategy", "RAG"), heals=state.get("heal_attempts", 0), confidence=state.get("confidence", 1.0), sources=unique_sources)
 
     draft_chunks = []
     async for chunk in generate_answer_stream(context, query):
@@ -229,13 +232,18 @@ async def reflect(state: AgentState):
     queue = state["queue"]
     await generate_sse(queue, "node", current_node="reflect")
 
-    decision = await asyncio.to_thread(
-        global_state.reflection_agent.decide,
-        query=query,
-        context=context,
-        draft_answer=draft_answer,
-        current_entity=get_latest_entity()
-    )
+    # Fast reflection decision with fallback
+    try:
+        decision = await asyncio.to_thread(
+            global_state.reflection_agent.decide,
+            query=query,
+            context=context,
+            draft_answer=draft_answer,
+            current_entity=get_latest_entity()
+        )
+    except Exception as e:
+        print(f"[graph] reflect error: {e}")
+        decision = "ACCEPT"
 
     if decision == "REGENERATE":
         await generate_sse(queue, "chunk", text="\n\n**Self-Correction Triggered:**\n\n")
@@ -248,7 +256,7 @@ async def reflect(state: AgentState):
         final_answer = draft_answer
 
     global_state.save_message(query, final_answer)
-    store_in_cache(query, final_answer, state["sources"])
+    store_in_cache(query, final_answer, state.get("sources", []))
 
     await queue.put("data: [DONE]\n\n")
     return {"final_answer": final_answer, "is_terminal": True}
@@ -256,7 +264,7 @@ async def reflect(state: AgentState):
 async def web_search_fallback(state: AgentState):
     query = state["query"]
     queue = state["queue"]
-    heal_attempts = state["heal_attempts"]
+    heal_attempts = state.get("heal_attempts", 0)
     await generate_sse(queue, "node", current_node="web_search_fallback")
 
     await generate_sse(queue, "metadata", strategy="WEB_SEARCH", heals=heal_attempts, confidence=0.0, sources=["DuckDuckGo Search"])
@@ -272,7 +280,6 @@ async def web_search_fallback(state: AgentState):
         context = "\n\n".join([f"Source: {res['href']}\nSnippet: {res['body']}" for res in results])
         sources = [res['href'] for res in results]
         
-        # Now use the LLM to generate an answer based on the web context
         draft_chunks = []
         async for chunk in generate_answer_stream(context, query):
             draft_chunks.append(chunk)
@@ -311,11 +318,11 @@ def route_heal(state: AgentState):
     if state.get("strategy") == "WEB_SEARCH":
         return "web_search_fallback"
     
-    is_conf = global_state.confidence_checker.is_confident(state["ranked_docs"], retry=(state["heal_attempts"] > 0))
-    if is_conf or state["heal_attempts"] >= MAX_HEAL_ATTEMPTS:
+    is_conf = global_state.confidence_checker.is_confident(state.get("ranked_docs", []), retry=(state.get("heal_attempts", 0) > 0))
+    if is_conf or state.get("heal_attempts", 0) >= MAX_HEAL_ATTEMPTS:
         return "build_knowledge_graph"
     
-    return "self_heal" # loop back
+    return "self_heal"
 
 # Build Graph
 builder = StateGraph(AgentState)
@@ -369,10 +376,8 @@ async def run_langgraph_stream(query: str):
             await generate_sse(queue, "chunk", text=f"Error: {str(e)}")
             await queue.put("data: [DONE]\n\n")
 
-    # Start graph traversal in background
     task = asyncio.create_task(process_graph())
 
-    # Yield from queue
     while True:
         chunk = await queue.get()
         yield chunk
