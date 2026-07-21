@@ -149,10 +149,11 @@ async def ask_question_stream(query):
         docs = await retrieve_documents(search_query)
 
         if not docs:
-            # ── Web Search Fallback (no docs) ──────────────────────────────
+            # ── General Knowledge Fallback (no matching docs) ──────────────
             yield f"data: {json.dumps({'type': 'node', 'current_node': 'web_search_fallback'})}\n\n"
-            yield "data: " + json.dumps({'type': 'metadata', 'strategy': 'REFUSE', 'heals': 0, 'confidence': 0.0, 'sources': []}) + "\n\n"
-            yield "data: " + json.dumps({'type': 'chunk', 'text': 'No relevant documents found. Please upload a document first.'}) + "\n\n"
+            yield "data: " + json.dumps({'type': 'metadata', 'strategy': 'GENERAL_KNOWLEDGE', 'heals': 0, 'confidence': 0.5, 'sources': ['LLM General Knowledge']}) + "\n\n"
+            async for chunk in generate_general_knowledge_stream(query):
+                yield "data: " + json.dumps({'type': 'chunk', 'text': chunk}) + "\n\n"
             yield "data: [DONE]\n\n"
             return
 
