@@ -10,15 +10,28 @@ DATA_DIR = "Data"
 def _get_embeddings():
     """
     Returns embedding model:
-    - Uses FastEmbedEmbeddings (ONNX Runtime, 25MB RAM, no external API token required).
-    - Falls back to OllamaEmbeddings when running locally.
+    - Uses zero-RAM Hugging Face API if HF_TOKEN is set.
+    - Uses 1-threaded FastEmbedEmbeddings for minimal RAM usage.
     """
-    has_groq = bool(os.environ.get("GROQ_API_KEY"))
+    hf_token = os.environ.get("HF_TOKEN")
+    if hf_token:
+        try:
+            from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
+            return HuggingFaceInferenceAPIEmbeddings(
+                api_key=hf_token,
+                model_name="sentence-transformers/all-MiniLM-L6-v2"
+            )
+        except Exception as e:
+            print(f"[embedder] HF API Error: {e}")
 
+    has_groq = bool(os.environ.get("GROQ_API_KEY"))
     if has_groq:
         try:
             from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
-            return FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+            return FastEmbedEmbeddings(
+                model_name="BAAI/bge-small-en-v1.5",
+                threads=1
+            )
         except Exception as e:
             print(f"[embedder] FastEmbedEmbeddings error: {e}")
 
@@ -27,32 +40,35 @@ def _get_embeddings():
         return OllamaEmbeddings(model="mxbai-embed-large")
     except Exception:
         from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
-        return FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+        return FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5", threads=1)
 
 
 def create_vector_db(pdf_path):
-    """Ingest a document and add its chunks into the shared ChromaDB collection safely."""
+    """Ingest a document into ChromaDB in small batches to keep memory usage under 200MB."""
     from src.splitter import split_documents
     embeddings = _get_embeddings()
     chunks = split_documents(pdf_path, embeddings=embeddings)
 
-    if global_state.vectorstore is not None:
-        global_state.vectorstore.add_documents(chunks)
-        return global_state.vectorstore
-    else:
-        vectorstore = Chroma(
+    if global_state.vectorstore is None:
+        global_state.vectorstore = Chroma(
             collection_name="langchain",
             embedding_function=embeddings,
             persist_directory=CHROMA_DIR
         )
-        vectorstore.add_documents(chunks)
-        return vectorstore
+
+    # Batching to prevent memory spikes
+    batch_size = 10
+    for i in range(0, len(chunks), batch_size):
+        batch = chunks[i:i + batch_size]
+        global_state.vectorstore.add_documents(batch)
+
+    return global_state.vectorstore
 
 
 def list_ingested_documents():
     """
     Returns a list of ingested documents with their chunk counts.
-    Derives document list directly from ChromaDB collection metadata (source field).
+    Derives document list directly from ChromaDB collection metadata.
     """
     try:
         client = chromadb.PersistentClient(path=CHROMA_DIR)
@@ -90,7 +106,6 @@ def list_ingested_documents():
 def delete_document_collection(doc_name: str) -> bool:
     """
     Delete all chunks belonging to a specific document from ChromaDB.
-    Returns True if any chunks were deleted, False if none found.
     """
     try:
         client = chromadb.PersistentClient(path=CHROMA_DIR)
