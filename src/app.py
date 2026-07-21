@@ -2,6 +2,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import os
+import asyncio
 
 from src.graph import run_langgraph_stream
 from src.embedder import create_vector_db, list_ingested_documents, delete_document_collection
@@ -37,6 +38,16 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def startup_event():
+    """Pre-warm system embeddings & vectorstore in background thread at server boot."""
+    try:
+        from src.rag_engine import initialize_system
+        asyncio.create_task(asyncio.to_thread(initialize_system))
+    except Exception as e:
+        print(f"[app] Startup pre-warm error: {e}")
+
+
 # ─────────────────────────────────────────────
 # HEALTH & SYSTEM STATUS
 # ─────────────────────────────────────────────
@@ -48,7 +59,7 @@ def health():
 
 @app.get("/system/status", response_model=SystemStatusResponse, tags=["System"])
 def system_status():
-    """Returns the current runtime state of the RAG system instantly without blocking on model downloads."""
+    """Returns the current runtime state of the RAG system instantly."""
     ingested = list_ingested_documents()
     docs_count = sum(d["chunk_count"] for d in ingested)
 
@@ -64,7 +75,7 @@ def system_status():
         "bm25_ready": global_state.bm25 is not None or vectorstore_exists,
         "vectorstore_ready": global_state.vectorstore is not None or vectorstore_exists,
         "llm_model": llm_name,
-        "embedding_model": "all-MiniLM-L6-v2 (Cloud)" if os.environ.get("GROQ_API_KEY") else "mxbai-embed-large (Local)",
+        "embedding_model": "bge-small-en-v1.5 (FastEmbed)" if os.environ.get("GROQ_API_KEY") else "mxbai-embed-large (Local)",
         "documents_ingested": len(ingested),
     }
 
@@ -117,7 +128,6 @@ async def upload_document(file: UploadFile = File(...)):
         f.write(await file.read())
 
     try:
-        import asyncio
         vectorstore = await asyncio.to_thread(create_vector_db, file_path)
         count = vectorstore._collection.count()
 
@@ -135,6 +145,7 @@ async def upload_document(file: UploadFile = File(...)):
             "message": f"Successfully ingested '{file.filename}' into {count} semantic chunks!"
         }
     except Exception as e:
+        print(f"[app] Upload error: {e}")
         return {"status": "error", "message": str(e)}
 
 
