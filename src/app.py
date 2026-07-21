@@ -56,6 +56,21 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def startup_event():
+    """
+    Pre-initialize LLM, Reranker, and agent components at server startup.
+    This imports langchain_groq once upfront (when RAM is clean) so that
+    /ask streaming requests never trigger a heavy ~150MB import mid-stream,
+    which would spike RAM and cause OOM on Render's 512MB free tier.
+    """
+    try:
+        await asyncio.to_thread(initialize_system)
+        print("[startup] System pre-initialized successfully.")
+    except Exception as e:
+        print(f"[startup] Pre-initialization error (non-fatal): {e}")
+
+
 # ─────────────────────────────────────────────
 # HEALTH & SYSTEM STATUS
 # ─────────────────────────────────────────────

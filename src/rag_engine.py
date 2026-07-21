@@ -84,8 +84,8 @@ async def ask_question_stream(query):
     yield f"data: {json.dumps({'type': 'node', 'current_node': 'analyze_query'})}\n\n"
 
     try:
-        # Run synchronous initialize_system in thread so it doesn't block the event loop
-        await asyncio.to_thread(initialize_system)
+        # initialize_system is pre-warmed at startup — this is a near no-op
+        initialize_system()
     except Exception as e:
         print(f"[ask] initialize_system error: {e}")
         yield "data: " + json.dumps({'type': 'chunk', 'text': f'System initialization error: {str(e)}'}) + "\n\n"
