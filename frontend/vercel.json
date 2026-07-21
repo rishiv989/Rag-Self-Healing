@@ -1,5 +1,16 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    {
+      "source": "/api/ask",
+      "destination": "https://rag-self-healing.onrender.com/ask"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://rag-self-healing.onrender.com/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
   ]
 }

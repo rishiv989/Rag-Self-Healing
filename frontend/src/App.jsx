@@ -1,7 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import "./App.css";
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || "https://rag-self-healing.onrender.com").replace(/\/$/, "");
+const API_BASE = import.meta.env.VITE_API_BASE_URL
+  ? import.meta.env.VITE_API_BASE_URL.replace(/\/$/, "")
+  : window.location.hostname.includes("vercel.app")
+  ? "/api"
+  : "http://127.0.0.1:8000";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
