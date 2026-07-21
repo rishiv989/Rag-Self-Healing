@@ -1,7 +1,8 @@
 import src.state as state
 
+
 async def generate_memory_answer_stream(query):
-    memory_context = state.chat_history[-1]["assistant"]
+    memory_context = state.chat_history[-1]["assistant"] if state.chat_history else ""
 
     prompt = f"""
 You are answering ONLY from prior grounded conversation memory.
@@ -18,8 +19,14 @@ Previous grounded assistant response:
 Current user question:
 {query}
 """
-    async for chunk in state.llm.astream(prompt):
-        yield chunk.content
+    try:
+        async for chunk in state.llm.astream(prompt):
+            text = chunk.content if hasattr(chunk, "content") else str(chunk)
+            yield text
+    except Exception as e:
+        print(f"[generation] memory astream fallback: {e}")
+        res = await state.llm.ainvoke(prompt)
+        yield res.content if hasattr(res, "content") else str(res)
 
 
 async def generate_answer_stream(context, query):
@@ -36,8 +43,14 @@ Instructions:
 Answer the question using the Document Context. Always cite your sources inline using bracketed numbers, e.g. [1] or [2].
 Do not list the sources at the end, just use the inline citations.
 """
-    async for chunk in state.llm.astream(prompt):
-        yield chunk.content
+    try:
+        async for chunk in state.llm.astream(prompt):
+            text = chunk.content if hasattr(chunk, "content") else str(chunk)
+            yield text
+    except Exception as e:
+        print(f"[generation] generate_answer_stream astream fallback: {e}")
+        res = await state.llm.ainvoke(prompt)
+        yield res.content if hasattr(res, "content") else str(res)
 
 
 async def correct_answer_stream(context, query, draft_answer):
@@ -51,5 +64,11 @@ Document Context:
 Previous Weak Answer:
 {draft_answer}
 """
-    async for chunk in state.llm.astream(prompt):
-        yield chunk.content
+    try:
+        async for chunk in state.llm.astream(prompt):
+            text = chunk.content if hasattr(chunk, "content") else str(chunk)
+            yield text
+    except Exception as e:
+        print(f"[generation] correct_answer_stream astream fallback: {e}")
+        res = await state.llm.ainvoke(prompt)
+        yield res.content if hasattr(res, "content") else str(res)
