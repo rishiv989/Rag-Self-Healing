@@ -12,9 +12,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import asyncio
 import gc
+from langchain_chroma import Chroma
 
 from src.graph import run_langgraph_stream
-from src.embedder import create_vector_db, list_ingested_documents, delete_document_collection
+from src.embedder import create_vector_db, list_ingested_documents, delete_document_collection, _get_embeddings
 import src.state as global_state
 from rank_bm25 import BM25Okapi
 from src.models import (
@@ -74,7 +75,7 @@ def system_status():
         "bm25_ready": global_state.bm25 is not None or vectorstore_exists,
         "vectorstore_ready": global_state.vectorstore is not None or vectorstore_exists,
         "llm_model": llm_name,
-        "embedding_model": "bge-small-en-v1.5 (FastEmbed)" if os.environ.get("GROQ_API_KEY") else "mxbai-embed-large (Local)",
+        "embedding_model": "FastCloudEmbeddings (Cloud)" if os.environ.get("GROQ_API_KEY") else "mxbai-embed-large (Local)",
         "documents_ingested": len(ingested),
     }
 
@@ -128,7 +129,6 @@ async def upload_document(file: UploadFile = File(...)):
 
     try:
         from src.splitter import split_documents
-        from src.embedder import _get_embeddings
 
         embeddings = _get_embeddings()
         chunks = split_documents(file_path, embeddings=embeddings)
@@ -137,7 +137,6 @@ async def upload_document(file: UploadFile = File(...)):
         if global_state.vectorstore is not None:
             global_state.vectorstore.add_documents(chunks)
         else:
-            from langchain_chroma import Chroma
             global_state.vectorstore = Chroma(
                 collection_name="langchain",
                 embedding_function=embeddings,
