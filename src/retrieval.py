@@ -19,11 +19,14 @@ async def vector_retrieve(search_query, search_type="similarity"):
         return []
 
     try:
-        retriever = state.vectorstore.as_retriever(
-            search_type="similarity",
-            search_kwargs={"k": 10 if search_type != "mmr" else 15}
-        )
-        docs = await retriever.ainvoke(search_query)
+        if hasattr(state.vectorstore, "as_retriever"):
+            retriever = state.vectorstore.as_retriever(
+                search_type="similarity",
+                search_kwargs={"k": 10 if search_type != "mmr" else 15}
+            )
+            docs = await retriever.ainvoke(search_query)
+        else:
+            docs = state.vectorstore.similarity_search(search_query, k=10)
         return filter_docs(docs)
     except Exception as e:
         print(f"[retrieval] vector_retrieve error: {e}")

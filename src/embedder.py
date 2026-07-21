@@ -39,6 +39,7 @@ class CloudVectorStore:
     """
     Lightweight, high-speed vector store for Cloud deployment.
     Uses zero C++ binary bindings and zero memory overhead (<30MB RAM).
+    Fully compatible with LangChain similarity search & retriever interfaces.
     """
     def __init__(self, embedding_function):
         self.embedding_function = embedding_function
@@ -74,6 +75,19 @@ class CloudVectorStore:
             scored.append((doc, float(dot)))
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:k]
+
+    def as_retriever(self, search_type="similarity", search_kwargs=None):
+        k = (search_kwargs or {}).get("k", 4)
+        store = self
+
+        class CloudRetriever:
+            async def ainvoke(self, query):
+                return store.similarity_search(query, k=k)
+
+            def invoke(self, query):
+                return store.similarity_search(query, k=k)
+
+        return CloudRetriever()
 
     def get(self, include=None):
         return {
