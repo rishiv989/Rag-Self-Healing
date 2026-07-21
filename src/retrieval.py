@@ -8,7 +8,6 @@ def filter_docs(docs):
         text = doc.page_content.lower()
         if "table of contents" in text:
             continue
-        # Only filter out completely empty or near-empty chunks (<15 characters)
         if len(text.strip()) < 15:
             continue
         filtered.append(doc)
@@ -19,16 +18,11 @@ async def vector_retrieve(search_query, search_type="similarity"):
     if state.vectorstore is None:
         return []
 
-    if search_type == "mmr":
-        retriever = state.vectorstore.as_retriever(
-            search_type="mmr",
-            search_kwargs={"k": 10, "fetch_k": 20, "lambda_mult": 0.5}
-        )
-    else:
-        retriever = state.vectorstore.as_retriever(
-            search_type="similarity",
-            search_kwargs={"k": 10}
-        )
+    # Use fast similarity retrieval without raw embedding memory spikes
+    retriever = state.vectorstore.as_retriever(
+        search_type="similarity",
+        search_kwargs={"k": 10 if search_type != "mmr" else 15}
+    )
 
     docs = await retriever.ainvoke(search_query)
     return filter_docs(docs)
