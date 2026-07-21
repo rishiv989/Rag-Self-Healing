@@ -6,19 +6,22 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Copy requirements & install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source code
+# Copy source code and initial data
 COPY src/ ./src/
 COPY Data/ ./Data/
+COPY chroma_db/ ./chroma_db/
 
-# Create necessary directories
-RUN mkdir -p chroma_db logs Data
+# Create working directories
+RUN mkdir -p chroma_db logs Data && chmod -R 777 chroma_db logs Data
 
-EXPOSE 8000
+ENV PORT=7860
+EXPOSE 7860
 
-CMD ["uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD uvicorn src.app:app --host 0.0.0.0 --port ${PORT:-7860}

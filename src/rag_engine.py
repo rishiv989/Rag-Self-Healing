@@ -1,6 +1,7 @@
 from langchain_chroma import Chroma
-from langchain_ollama import OllamaEmbeddings, ChatOllama
 from rank_bm25 import BM25Okapi
+import os
+from src.embedder import _get_embeddings
 
 import src.state as state
 from src.reranker import Reranker
@@ -21,49 +22,69 @@ import asyncio
 MAX_HEAL_ATTEMPTS = 2
 
 def initialize_system():
-    if state.vectorstore is not None:
-        return
+    embeddings = _get_embeddings()
 
-    embeddings = OllamaEmbeddings(model="mxbai-embed-large")
+    if state.vectorstore is None:
+        state.vectorstore = Chroma(
+            persist_directory="chroma_db",
+            embedding_function=embeddings
+        )
+        
+        state.cache_store = Chroma(
+            collection_name="semantic_cache",
+            persist_directory="chroma_db",
+            embedding_function=embeddings
+        )
 
-    state.vectorstore = Chroma(
-        persist_directory="chroma_db",
-        embedding_function=embeddings
-    )
-    
-    state.cache_store = Chroma(
-        collection_name="semantic_cache",
-        persist_directory="chroma_db",
-        embedding_function=embeddings
-    )
+        try:
+            db = state.vectorstore.get()
+            state.ALL_DOCS = db["documents"]
+            state.ALL_METADATA = db["metadatas"]
+        except Exception as e:
+            print(f"Error loading Chroma DB: {e}")
+            state.ALL_DOCS = []
+            state.ALL_METADATA = []
 
-    try:
-        db = state.vectorstore.get()
-        state.ALL_DOCS = db["documents"]
-        state.ALL_METADATA = db["metadatas"]
-    except Exception as e:
-        print(f"Error loading Chroma DB: {e}")
-        state.ALL_DOCS = []
-        state.ALL_METADATA = []
+        if state.ALL_DOCS:
+            tokenized_corpus = [
+                doc.lower().split()
+                for doc in state.ALL_DOCS
+            ]
+            state.bm25 = BM25Okapi(tokenized_corpus)
+        else:
+            state.bm25 = None
 
-    if state.ALL_DOCS:
-        tokenized_corpus = [
-            doc.lower().split()
-            for doc in state.ALL_DOCS
-        ]
-        state.bm25 = BM25Okapi(tokenized_corpus)
-    else:
-        state.bm25 = None
+    if state.llm is None:
+        groq_api_key = os.environ.get("GROQ_API_KEY")
+        if groq_api_key:
+            try:
+                from langchain_groq import ChatGroq
+                state.llm = ChatGroq(
+                    model_name=os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"),
+                    groq_api_key=groq_api_key,
+                    temperature=0
+                )
+                print("[rag_engine] LLM initialized using Groq API (Cloud Mode).")
+            except Exception as e:
+                print(f"[rag_engine] ChatGroq init error: {e}. Falling back to ChatOllama.")
+                from langchain_ollama import ChatOllama
+                state.llm = ChatOllama(model="llama3.2", temperature=0)
+        else:
+            from langchain_ollama import ChatOllama
+            state.llm = ChatOllama(
+                model="llama3.2",
+                temperature=0
+            )
+            print("[rag_engine] LLM initialized using local Ollama (Local Mode).")
 
-    state.llm = ChatOllama(
-        model="llama3.2",
-        temperature=0
-    )
-
-    state.reflection_agent = ReflectionAgent(state.llm)
-    state.reranker = Reranker()
-    state.confidence_checker = ConfidenceChecker()
-    state.healing_policy = HealingPolicy()
+    if state.reflection_agent is None:
+        state.reflection_agent = ReflectionAgent(state.llm)
+    if state.reranker is None:
+        state.reranker = Reranker()
+    if state.confidence_checker is None:
+        state.confidence_checker = ConfidenceChecker()
+    if state.healing_policy is None:
+        state.healing_policy = HealingPolicy()
 
 
 async def ask_question_stream(query):

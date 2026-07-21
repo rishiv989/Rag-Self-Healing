@@ -55,12 +55,16 @@ def system_status():
     docs_count = len(global_state.ALL_DOCS)
     ingested = list_ingested_documents()
 
+    llm_name = "llama3.2 (Ollama)"
+    if os.environ.get("GROQ_API_KEY"):
+        llm_name = f"{os.environ.get('GROQ_MODEL', 'llama-3.3-70b-versatile')} (Groq Cloud)"
+
     return {
         "status": "ok",
         "total_chunks": docs_count,
         "bm25_ready": global_state.bm25 is not None,
         "vectorstore_ready": global_state.vectorstore is not None,
-        "llm_model": "llama3.2",
+        "llm_model": llm_name,
         "embedding_model": "mxbai-embed-large",
         "documents_ingested": len(ingested),
     }
