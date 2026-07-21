@@ -80,142 +80,159 @@ def initialize_system():
 
 
 async def ask_question_stream(query):
-    initialize_system()
+    # Yield FIRST — flushes HTTP 200 + headers to nginx immediately (<1ms)
+    yield f"data: {json.dumps({'type': 'node', 'current_node': 'analyze_query'})}\n\n"
 
-    if query.lower().strip() == "analyze failures":
-        yield f"data: {{'type': 'metadata', 'strategy': 'REPORT', 'heals': 0, 'confidence': 1.0, 'sources': []}}\n\n".replace("'", '"')
-        yield "data: " + json.dumps({'type': 'chunk', 'text': pretty_failure_report()}) + "\n\n"
+    try:
+        # Run synchronous initialize_system in thread so it doesn't block the event loop
+        await asyncio.to_thread(initialize_system)
+    except Exception as e:
+        print(f"[ask] initialize_system error: {e}")
+        yield "data: " + json.dumps({'type': 'chunk', 'text': f'System initialization error: {str(e)}'}) + "\n\n"
         yield "data: [DONE]\n\n"
         return
 
-    from src.semantic_cache import check_cache, store_in_cache
-    cache_hit = check_cache(query)
-    if cache_hit:
-        yield "data: " + json.dumps({'type': 'metadata', 'strategy': 'CACHE', 'heals': 0, 'confidence': 1.0, 'sources': cache_hit['sources']}) + "\n\n"
-        yield "data: " + json.dumps({'type': 'chunk', 'text': cache_hit['answer']}) + "\n\n"
-        yield "data: [DONE]\n\n"
-        return
-
-    store_mentions(query)
-    
-    from src.query_processor import extract_entities
-    if extract_entities(query):
-        store_valid_entities(query)
-
-    search_query = resolve_query(query, get_latest_entity())
-
-    if search_query is None:
-        log_failure(query, query, "CLARIFY", [], "pronoun_without_entity")
-        yield "data: " + json.dumps({'type': 'metadata', 'strategy': 'REFUSE', 'heals': 0, 'confidence': 0.0, 'sources': []}) + "\n\n"
-        yield "data: " + json.dumps({'type': 'chunk', 'text': 'Who are you referring to?'}) + "\n\n"
-        yield "data: [DONE]\n\n"
-        return
-
-    if is_ambiguous_multi_entity(query, state.mention_memory["recent_mentions"]):
-        mentions = state.mention_memory["recent_mentions"][-2:]
-        yield "data: " + json.dumps({'type': 'metadata', 'strategy': 'CLARIFY', 'heals': 0, 'confidence': 0.0, 'sources': []}) + "\n\n"
-        yield "data: " + json.dumps({'type': 'chunk', 'text': f'Do you mean between {mentions[0]} and {mentions[1]}?'}) + "\n\n"
-        yield "data: [DONE]\n\n"
-        return
-
-    if memory_relevant(search_query):
-        yield "data: " + json.dumps({'type': 'metadata', 'strategy': 'MEMORY', 'heals': 0, 'confidence': 1.0, 'sources': ['Conversation Memory']}) + "\n\n"
-        memory_answer_text = ""
-        async for chunk in generate_memory_answer_stream(search_query):
-            memory_answer_text += chunk
-            yield "data: " + json.dumps({'type': 'chunk', 'text': chunk}) + "\n\n"
-        if memory_answer_text:
+    try:
+        if query.lower().strip() == "analyze failures":
+            yield f"data: {json.dumps({'type': 'metadata', 'strategy': 'REPORT', 'heals': 0, 'confidence': 1.0, 'sources': []})}\n\n"
+            yield "data: " + json.dumps({'type': 'chunk', 'text': pretty_failure_report()}) + "\n\n"
             yield "data: [DONE]\n\n"
             return
 
-    docs = await retrieve_documents(search_query)
+        from src.semantic_cache import check_cache, store_in_cache
+        cache_hit = check_cache(query)
+        if cache_hit and cache_hit.get('answer'):
+            yield "data: " + json.dumps({'type': 'metadata', 'strategy': 'CACHE', 'heals': 0, 'confidence': 1.0, 'sources': cache_hit['sources']}) + "\n\n"
+            yield "data: " + json.dumps({'type': 'chunk', 'text': cache_hit['answer']}) + "\n\n"
+            yield "data: [DONE]\n\n"
+            return
 
-    if not docs:
-        yield "data: " + json.dumps({'type': 'metadata', 'strategy': 'REFUSE', 'heals': 0, 'confidence': 0.0, 'sources': []}) + "\n\n"
-        yield "data: " + json.dumps({'type': 'chunk', 'text': 'No relevant documents found.'}) + "\n\n"
-        yield "data: [DONE]\n\n"
-        return
+        store_mentions(query)
+        
+        from src.query_processor import extract_entities
+        if extract_entities(query):
+            store_valid_entities(query)
 
-    ranked_docs = state.reranker.rerank(search_query, docs, top_k=3)
+        search_query = resolve_query(query, get_latest_entity())
 
-    low_confidence = not state.confidence_checker.is_confident(ranked_docs)
-    heal_attempts = 0
-    strategy = "RAG"
+        if search_query is None:
+            log_failure(query, query, "CLARIFY", [], "pronoun_without_entity")
+            yield "data: " + json.dumps({'type': 'metadata', 'strategy': 'REFUSE', 'heals': 0, 'confidence': 0.0, 'sources': []}) + "\n\n"
+            yield "data: " + json.dumps({'type': 'chunk', 'text': 'Who are you referring to?'}) + "\n\n"
+            yield "data: [DONE]\n\n"
+            return
 
-    while low_confidence and heal_attempts < MAX_HEAL_ATTEMPTS:
-        heal_attempts += 1
+        if is_ambiguous_multi_entity(query, state.mention_memory["recent_mentions"]):
+            mentions = state.mention_memory["recent_mentions"][-2:]
+            yield "data: " + json.dumps({'type': 'metadata', 'strategy': 'CLARIFY', 'heals': 0, 'confidence': 0.0, 'sources': []}) + "\n\n"
+            yield "data: " + json.dumps({'type': 'chunk', 'text': f'Do you mean between {mentions[0]} and {mentions[1]}?'}) + "\n\n"
+            yield "data: [DONE]\n\n"
+            return
 
-        base_strategy = state.healing_policy.decide(
-            ranked_docs,
-            query,
-            search_query,
-            get_latest_entity()
+        if memory_relevant(search_query):
+            yield "data: " + json.dumps({'type': 'metadata', 'strategy': 'MEMORY', 'heals': 0, 'confidence': 1.0, 'sources': ['Conversation Memory']}) + "\n\n"
+            memory_answer_text = ""
+            async for chunk in generate_memory_answer_stream(search_query):
+                memory_answer_text += chunk
+                yield "data: " + json.dumps({'type': 'chunk', 'text': chunk}) + "\n\n"
+            if memory_answer_text:
+                yield "data: [DONE]\n\n"
+                return
+
+        docs = await retrieve_documents(search_query)
+
+        if not docs:
+            yield "data: " + json.dumps({'type': 'metadata', 'strategy': 'REFUSE', 'heals': 0, 'confidence': 0.0, 'sources': []}) + "\n\n"
+            yield "data: " + json.dumps({'type': 'chunk', 'text': 'No relevant documents found. Please upload a document first.'}) + "\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        ranked_docs = state.reranker.rerank(search_query, docs, top_k=3)
+
+        low_confidence = not state.confidence_checker.is_confident(ranked_docs)
+        heal_attempts = 0
+        strategy = "RAG"
+
+        while low_confidence and heal_attempts < MAX_HEAL_ATTEMPTS:
+            heal_attempts += 1
+
+            base_strategy = state.healing_policy.decide(
+                ranked_docs,
+                query,
+                search_query,
+                get_latest_entity()
+            )
+
+            strategy = adaptive_decision(base_strategy)
+
+            if strategy == "REFUSE":
+                yield "data: " + json.dumps({'type': 'metadata', 'strategy': strategy, 'heals': heal_attempts, 'confidence': 0.0, 'sources': []}) + "\n\n"
+                yield "data: " + json.dumps({'type': 'chunk', 'text': 'I could not confidently find relevant information.'}) + "\n\n"
+                yield "data: [DONE]\n\n"
+                return
+
+            if strategy == "MMR":
+                mmr_docs = await retrieve_documents(search_query, "mmr")
+                ranked_docs = state.reranker.rerank(search_query, mmr_docs, top_k=3)
+                low_confidence = not state.confidence_checker.is_confident(ranked_docs, retry=True)
+
+        top_docs = [doc for doc, _ in ranked_docs]
+        context = "\n\n".join(doc.page_content for doc in top_docs)
+        
+        confidence = ranked_docs[0][1] if ranked_docs else 0.0
+        if hasattr(confidence, "item"):
+            confidence = float(confidence.item())
+
+        sources = []
+        for doc in top_docs:
+            source_name = doc.metadata.get("source", "Unknown Source")
+            if "\\" in source_name or "/" in source_name:
+                source_name = source_name.replace("\\", "/").split("/")[-1]
+            page = doc.metadata.get("page")
+            if page is not None:
+                sources.append(f"{source_name} (Page {page})")
+            else:
+                sources.append(source_name)
+        unique_sources = list(dict.fromkeys(sources))
+
+        yield "data: " + json.dumps({'type': 'metadata', 'strategy': strategy, 'heals': heal_attempts, 'confidence': confidence, 'sources': unique_sources}) + "\n\n"
+
+        draft_chunks = []
+        async for chunk in generate_answer_stream(context, query):
+            draft_chunks.append(chunk)
+            yield "data: " + json.dumps({'type': 'chunk', 'text': chunk}) + "\n\n"
+            
+        draft_answer = "".join(draft_chunks)
+
+        decision = await state.reflection_agent.decide_async(
+            query=query,
+            context=context,
+            draft_answer=draft_answer,
+            current_entity=get_latest_entity()
         )
 
-        strategy = adaptive_decision(base_strategy)
-
-        if strategy == "REFUSE":
-            yield "data: " + json.dumps({'type': 'metadata', 'strategy': strategy, 'heals': heal_attempts, 'confidence': 0.0, 'sources': []}) + "\n\n"
-            yield "data: " + json.dumps({'type': 'chunk', 'text': 'I could not confidently find relevant information.'}) + "\n\n"
-            yield "data: [DONE]\n\n"
-            return
-
-        if strategy == "MMR":
-            mmr_docs = await retrieve_documents(search_query, "mmr")
-            ranked_docs = state.reranker.rerank(search_query, mmr_docs, top_k=3)
-            low_confidence = not state.confidence_checker.is_confident(ranked_docs, retry=True)
-
-    top_docs = [doc for doc, _ in ranked_docs]
-    context = "\n\n".join(doc.page_content for doc in top_docs)
-    
-    confidence = ranked_docs[0][1] if ranked_docs else 0.0
-    if hasattr(confidence, "item"):
-        confidence = float(confidence.item())
-
-    sources = []
-    for doc in top_docs:
-        source_name = doc.metadata.get("source", "Unknown Source")
-        if "\\" in source_name or "/" in source_name:
-            source_name = source_name.replace("\\", "/").split("/")[-1]
-        page = doc.metadata.get("page")
-        if page is not None:
-            sources.append(f"{source_name} (Page {page})")
+        if decision == "REGENERATE":
+            yield "data: " + json.dumps({'type': 'chunk', 'text': '\n\n**Self-Correction Triggered:**\n\n'}) + "\n\n"
+            final_chunks = []
+            async for chunk in correct_answer_stream(context, query, draft_answer):
+                final_chunks.append(chunk)
+                yield "data: " + json.dumps({'type': 'chunk', 'text': chunk}) + "\n\n"
+            final_answer = "".join(final_chunks)
         else:
-            sources.append(source_name)
-    unique_sources = list(dict.fromkeys(sources))
+            final_answer = draft_answer
 
-    yield "data: " + json.dumps({'type': 'metadata', 'strategy': strategy, 'heals': heal_attempts, 'confidence': confidence, 'sources': unique_sources}) + "\n\n"
+        state.chat_history.append({
+            "user": query,
+            "assistant": final_answer
+        })
+        state.save_session()
 
-    draft_chunks = []
-    async for chunk in generate_answer_stream(context, query):
-        draft_chunks.append(chunk)
-        yield "data: " + json.dumps({'type': 'chunk', 'text': chunk}) + "\n\n"
-        
-    draft_answer = "".join(draft_chunks)
+        store_in_cache(query, final_answer, unique_sources)
 
-    decision = await state.reflection_agent.decide_async(
-        query=query,
-        context=context,
-        draft_answer=draft_answer,
-        current_entity=get_latest_entity()
-    )
-
-    if decision == "REGENERATE":
-        yield "data: " + json.dumps({'type': 'chunk', 'text': '\n\n**Self-Correction Triggered:**\n\n'}) + "\n\n"
-        final_chunks = []
-        async for chunk in correct_answer_stream(context, query, draft_answer):
-            final_chunks.append(chunk)
-            yield "data: " + json.dumps({'type': 'chunk', 'text': chunk}) + "\n\n"
-        final_answer = "".join(final_chunks)
-    else:
-        final_answer = draft_answer
-
-    state.chat_history.append({
-        "user": query,
-        "assistant": final_answer
-    })
-    state.save_session()
-
-    store_in_cache(query, final_answer, unique_sources)
+    except Exception as e:
+        import traceback
+        print(f"[ask_question_stream] Unhandled error: {e}")
+        traceback.print_exc()
+        yield "data: " + json.dumps({'type': 'chunk', 'text': f'Error: {str(e)}'}) + "\n\n"
 
     yield "data: [DONE]\n\n"

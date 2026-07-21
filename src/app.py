@@ -13,7 +13,10 @@ from fastapi.responses import StreamingResponse
 import asyncio
 import gc
 
-from src.graph import run_langgraph_stream
+from src.rag_engine import (
+    ask_question_stream,
+    initialize_system,
+)
 from src.embedder import (
     create_vector_db,
     list_ingested_documents,
@@ -91,7 +94,7 @@ def system_status():
 async def ask(request: QuestionRequest):
     """Stream a response for a given question using the self-healing RAG pipeline."""
     return StreamingResponse(
-        run_langgraph_stream(request.question),
+        ask_question_stream(request.question),
         media_type="text/event-stream",
         headers={
             "X-Accel-Buffering": "no",      # Disable nginx proxy buffering on Render
