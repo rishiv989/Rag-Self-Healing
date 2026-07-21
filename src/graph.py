@@ -345,13 +345,14 @@ builder.add_edge("web_search_fallback", END)
 rag_graph = builder.compile()
 
 async def run_langgraph_stream(query: str):
-    if global_state.llm is None or global_state.vectorstore is None:
-        from src.rag_engine import initialize_system
-        initialize_system()
-
     queue = asyncio.Queue()
-    
+    # Flush HTTP 200 OK response headers immediately (<1ms) to bypass Render 30s proxy timeout
+    await queue.put({"type": "node", "current_node": "analyze_query"})
+
     async def process_graph():
+        if global_state.llm is None or global_state.vectorstore is None:
+            from src.rag_engine import initialize_system
+            initialize_system()
         try:
             await rag_graph.ainvoke({
                 "query": query,
