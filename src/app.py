@@ -1,9 +1,15 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 import os
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 import asyncio
 import gc
 
@@ -149,7 +155,6 @@ async def upload_document(file: UploadFile = File(...)):
             )
             global_state.vectorstore.add_documents(chunks)
 
-        # Efficiently append new chunks to state memory without full DB reload
         new_docs = [c.page_content for c in chunks]
         new_meta = [c.metadata for c in chunks]
         global_state.ALL_DOCS.extend(new_docs)
@@ -159,7 +164,6 @@ async def upload_document(file: UploadFile = File(...)):
             tokenized_corpus = [doc.lower().split() for doc in global_state.ALL_DOCS]
             global_state.bm25 = BM25Okapi(tokenized_corpus)
 
-        # Free temporary ONNX / C++ memory allocations
         gc.collect()
 
         return {
