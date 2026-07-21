@@ -10,30 +10,26 @@ DATA_DIR = "Data"
 def _get_embeddings():
     """
     Returns embedding model:
-    - Uses zero-RAM Hugging Face API if HF_TOKEN is set.
-    - Uses 1-threaded FastEmbedEmbeddings for minimal RAM usage.
+    - In Cloud Mode (GROQ_API_KEY set), uses zero-CPU / zero-RAM Hugging Face Inference API embeddings.
+    - Falls back to FastEmbed (1-thread) or Ollama in local mode.
     """
-    hf_token = os.environ.get("HF_TOKEN")
-    if hf_token:
+    has_groq = bool(os.environ.get("GROQ_API_KEY"))
+
+    if has_groq:
         try:
             from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
+            hf_token = os.environ.get("HF_TOKEN", "hf_qWRvKjGzXFpLBsTmDfYhNvC")
             return HuggingFaceInferenceAPIEmbeddings(
                 api_key=hf_token,
                 model_name="sentence-transformers/all-MiniLM-L6-v2"
             )
         except Exception as e:
             print(f"[embedder] HF API Error: {e}")
-
-    has_groq = bool(os.environ.get("GROQ_API_KEY"))
-    if has_groq:
-        try:
-            from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
-            return FastEmbedEmbeddings(
-                model_name="BAAI/bge-small-en-v1.5",
-                threads=1
-            )
-        except Exception as e:
-            print(f"[embedder] FastEmbedEmbeddings error: {e}")
+            try:
+                from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+                return FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5", threads=1)
+            except Exception:
+                pass
 
     try:
         from langchain_ollama import OllamaEmbeddings
@@ -56,7 +52,6 @@ def create_vector_db(pdf_path):
             persist_directory=CHROMA_DIR
         )
 
-    # Batching to prevent memory spikes
     batch_size = 10
     for i in range(0, len(chunks), batch_size):
         batch = chunks[i:i + batch_size]
