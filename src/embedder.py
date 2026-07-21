@@ -10,15 +10,17 @@ def _get_embeddings():
     """
     Returns embedding model:
     - If GROQ_API_KEY or EMBEDDING_PROVIDER == 'huggingface' or Ollama is unavailable, uses HuggingFaceEmbeddings.
+      Defaults to 'sentence-transformers/all-MiniLM-L6-v2' (90MB lightweight model) for 512MB RAM free tiers like Render.
     - Otherwise uses local OllamaEmbeddings(model='mxbai-embed-large').
     """
     provider = os.environ.get("EMBEDDING_PROVIDER", "").lower()
     has_groq = bool(os.environ.get("GROQ_API_KEY"))
+    cloud_model = os.environ.get("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 
     if provider == "huggingface" or has_groq:
         try:
             from langchain_huggingface import HuggingFaceEmbeddings
-            return HuggingFaceEmbeddings(model_name="mixedbread-ai/mxbai-embed-large")
+            return HuggingFaceEmbeddings(model_name=cloud_model)
         except Exception as e:
             print(f"[embedder] HuggingFaceEmbeddings fallback error: {e}")
 
@@ -28,7 +30,7 @@ def _get_embeddings():
         return OllamaEmbeddings(model="mxbai-embed-large")
     except Exception:
         from langchain_huggingface import HuggingFaceEmbeddings
-        return HuggingFaceEmbeddings(model_name="mixedbread-ai/mxbai-embed-large")
+        return HuggingFaceEmbeddings(model_name=cloud_model)
 
 
 def create_vector_db(pdf_path):
