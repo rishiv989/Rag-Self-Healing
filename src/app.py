@@ -47,16 +47,6 @@ app.add_middleware(
 )
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Pre-warm system embeddings & vectorstore in background thread at server boot."""
-    try:
-        from src.rag_engine import initialize_system
-        asyncio.create_task(asyncio.to_thread(initialize_system))
-    except Exception as e:
-        print(f"[app] Startup pre-warm error: {e}")
-
-
 # ─────────────────────────────────────────────
 # HEALTH & SYSTEM STATUS
 # ─────────────────────────────────────────────
