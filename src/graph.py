@@ -160,7 +160,6 @@ async def build_knowledge_graph(state: AgentState):
     
     await generate_sse(queue, "node", current_node="build_knowledge_graph")
     
-    # In cloud mode (Render 30s timeout constraint), skip heavy separate graph extraction LLM call
     if os.environ.get("GROQ_API_KEY"):
         return {"graph_context": ""}
 
@@ -232,7 +231,6 @@ async def reflect(state: AgentState):
     queue = state["queue"]
     await generate_sse(queue, "node", current_node="reflect")
 
-    # Fast reflection decision with fallback
     try:
         decision = await asyncio.to_thread(
             global_state.reflection_agent.decide,
@@ -348,8 +346,9 @@ builder.add_edge("web_search_fallback", END)
 rag_graph = builder.compile()
 
 async def run_langgraph_stream(query: str):
-    from src.rag_engine import initialize_system
-    initialize_system()
+    if global_state.llm is None or global_state.vectorstore is None:
+        from src.rag_engine import initialize_system
+        initialize_system()
 
     queue = asyncio.Queue()
     
