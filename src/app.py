@@ -131,10 +131,11 @@ async def upload_document(file: UploadFile = File(...)):
         vectorstore = await asyncio.to_thread(create_vector_db, file_path)
         count = vectorstore._collection.count()
 
-        db = vectorstore.get()
+        # Efficiently fetch only documents and metadatas, excluding heavy embedding arrays
+        db = vectorstore.get(include=["documents", "metadatas"])
         global_state.vectorstore = vectorstore
-        global_state.ALL_DOCS = db["documents"]
-        global_state.ALL_METADATA = db["metadatas"]
+        global_state.ALL_DOCS = db.get("documents", []) or []
+        global_state.ALL_METADATA = db.get("metadatas", []) or []
 
         if global_state.ALL_DOCS:
             tokenized_corpus = [doc.lower().split() for doc in global_state.ALL_DOCS]
@@ -167,9 +168,9 @@ def delete_document(doc_name: str):
         success = delete_document_collection(doc_name)
         if success:
             if global_state.vectorstore:
-                db = global_state.vectorstore.get()
-                global_state.ALL_DOCS = db["documents"]
-                global_state.ALL_METADATA = db["metadatas"]
+                db = global_state.vectorstore.get(include=["documents", "metadatas"])
+                global_state.ALL_DOCS = db.get("documents", []) or []
+                global_state.ALL_METADATA = db.get("metadatas", []) or []
                 if global_state.ALL_DOCS:
                     tokenized_corpus = [doc.lower().split() for doc in global_state.ALL_DOCS]
                     global_state.bm25 = BM25Okapi(tokenized_corpus)
