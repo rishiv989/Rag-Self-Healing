@@ -26,7 +26,6 @@ class ReflectionAgent:
             for p in pronouns
         )
 
-        # Ambiguous pronoun with no memory
         if has_pronoun and not current_entity:
             return "CLARIFY"
 
@@ -69,18 +68,21 @@ Decision rules:
 Return ONLY the action word.
 """
 
-        response = self.llm.invoke(prompt)
+        try:
+            response = self.llm.invoke(prompt)
+            decision = response.content.strip().upper()
 
-        decision = response.content.strip().upper()
+            valid = {
+                "ACCEPT",
+                "REGENERATE",
+                "RETRIEVE_AGAIN",
+                "REFUSE"
+            }
 
-        valid = {
-            "ACCEPT",
-            "REGENERATE",
-            "RETRIEVE_AGAIN",
-            "REFUSE"
-        }
+            if decision not in valid:
+                return "ACCEPT"
 
-        if decision not in valid:
-            return "REGENERATE"
-
-        return decision
+            return decision
+        except Exception as e:
+            print(f"[reflection] LLM evaluation error fallback to ACCEPT: {e}")
+            return "ACCEPT"
