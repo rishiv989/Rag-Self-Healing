@@ -232,8 +232,7 @@ async def reflect(state: AgentState):
     await generate_sse(queue, "node", current_node="reflect")
 
     try:
-        decision = await asyncio.to_thread(
-            global_state.reflection_agent.decide,
+        decision = await global_state.reflection_agent.decide_async(
             query=query,
             context=context,
             draft_answer=draft_answer,

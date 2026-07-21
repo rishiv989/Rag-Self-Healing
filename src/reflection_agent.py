@@ -2,7 +2,7 @@ class ReflectionAgent:
     def __init__(self, llm):
         self.llm = llm
 
-    def decide(
+    async def decide_async(
         self,
         query,
         context,
@@ -69,7 +69,7 @@ Return ONLY the action word.
 """
 
         try:
-            response = self.llm.invoke(prompt)
+            response = await self.llm.ainvoke(prompt)
             decision = response.content.strip().upper()
 
             valid = {
@@ -85,4 +85,11 @@ Return ONLY the action word.
             return decision
         except Exception as e:
             print(f"[reflection] LLM evaluation error fallback to ACCEPT: {e}")
+            return "ACCEPT"
+
+    def decide(self, query, context, draft_answer, current_entity=None):
+        import asyncio
+        try:
+            return asyncio.run(self.decide_async(query, context, draft_answer, current_entity))
+        except Exception:
             return "ACCEPT"
