@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import os
 import asyncio
+import gc
 
 from src.graph import run_langgraph_stream
 from src.embedder import create_vector_db, list_ingested_documents, delete_document_collection
@@ -120,7 +121,7 @@ def reset_chat():
 
 @app.post("/upload", tags=["Documents"])
 async def upload_document(file: UploadFile = File(...)):
-    """Upload and ingest a PDF or text document into the vector database."""
+    """Upload and ingest a PDF or text document into the vector database with zero-memory-spike optimization."""
     os.makedirs("Data", exist_ok=True)
     file_path = os.path.join("Data", file.filename)
 
@@ -128,18 +129,36 @@ async def upload_document(file: UploadFile = File(...)):
         f.write(await file.read())
 
     try:
-        vectorstore = await asyncio.to_thread(create_vector_db, file_path)
-        count = vectorstore._collection.count()
+        from src.splitter import split_documents
+        from src.embedder import _get_embeddings
 
-        # Efficiently fetch only documents and metadatas, excluding heavy embedding arrays
-        db = vectorstore.get(include=["documents", "metadatas"])
-        global_state.vectorstore = vectorstore
-        global_state.ALL_DOCS = db.get("documents", []) or []
-        global_state.ALL_METADATA = db.get("metadatas", []) or []
+        embeddings = _get_embeddings()
+        chunks = split_documents(file_path, embeddings=embeddings)
+        count = len(chunks)
+
+        if global_state.vectorstore is not None:
+            global_state.vectorstore.add_documents(chunks)
+        else:
+            from langchain_chroma import Chroma
+            global_state.vectorstore = Chroma(
+                collection_name="langchain",
+                embedding_function=embeddings,
+                persist_directory="chroma_db"
+            )
+            global_state.vectorstore.add_documents(chunks)
+
+        # Efficiently append new chunks to state memory without full DB reload
+        new_docs = [c.page_content for c in chunks]
+        new_meta = [c.metadata for c in chunks]
+        global_state.ALL_DOCS.extend(new_docs)
+        global_state.ALL_METADATA.extend(new_meta)
 
         if global_state.ALL_DOCS:
             tokenized_corpus = [doc.lower().split() for doc in global_state.ALL_DOCS]
             global_state.bm25 = BM25Okapi(tokenized_corpus)
+
+        # Free temporary ONNX / C++ memory allocations
+        gc.collect()
 
         return {
             "status": "success",
@@ -147,6 +166,7 @@ async def upload_document(file: UploadFile = File(...)):
         }
     except Exception as e:
         print(f"[app] Upload error: {e}")
+        gc.collect()
         return {"status": "error", "message": str(e)}
 
 
@@ -174,6 +194,7 @@ def delete_document(doc_name: str):
                 if global_state.ALL_DOCS:
                     tokenized_corpus = [doc.lower().split() for doc in global_state.ALL_DOCS]
                     global_state.bm25 = BM25Okapi(tokenized_corpus)
+            gc.collect()
             return {"status": "success", "message": f"Deleted '{doc_name}' from knowledge base."}
         else:
             raise HTTPException(status_code=404, detail=f"Document '{doc_name}' not found.")
