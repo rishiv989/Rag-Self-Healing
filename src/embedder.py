@@ -10,29 +10,18 @@ DATA_DIR = "Data"
 def _get_embeddings():
     """
     Returns embedding model:
-    - In Cloud Mode (GROQ_API_KEY set), uses zero-RAM HuggingFace Inference API or FastEmbed.
-    - Otherwise uses local OllamaEmbeddings(model='mxbai-embed-large').
+    - Uses FastEmbedEmbeddings (ONNX Runtime, 25MB RAM, no external API token required).
+    - Falls back to OllamaEmbeddings when running locally.
     """
-    provider = os.environ.get("EMBEDDING_PROVIDER", "").lower()
     has_groq = bool(os.environ.get("GROQ_API_KEY"))
 
-    if provider == "huggingface" or has_groq:
+    if has_groq:
         try:
-            from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
-            hf_token = os.environ.get("HF_TOKEN", "hf_dummy")
-            return HuggingFaceInferenceAPIEmbeddings(
-                api_key=hf_token,
-                model_name="sentence-transformers/all-MiniLM-L6-v2"
-            )
+            from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+            return FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
         except Exception as e:
-            print(f"[embedder] HuggingFaceInferenceAPIEmbeddings error: {e}")
-            try:
-                from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
-                return FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
-            except Exception:
-                pass
+            print(f"[embedder] FastEmbedEmbeddings error: {e}")
 
-    # Default to Ollama with automatic fallback
     try:
         from langchain_ollama import OllamaEmbeddings
         return OllamaEmbeddings(model="mxbai-embed-large")
