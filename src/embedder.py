@@ -10,20 +10,29 @@ DATA_DIR = "Data"
 def _get_embeddings():
     """
     Returns embedding model:
-    - If GROQ_API_KEY is present or EMBEDDING_PROVIDER == 'fastembed', uses FastEmbedEmbeddings (ONNX Runtime, 25MB RAM).
+    - In Cloud Mode (GROQ_API_KEY set), uses zero-RAM HuggingFace Inference API or FastEmbed.
     - Otherwise uses local OllamaEmbeddings(model='mxbai-embed-large').
     """
     provider = os.environ.get("EMBEDDING_PROVIDER", "").lower()
     has_groq = bool(os.environ.get("GROQ_API_KEY"))
 
-    if provider == "fastembed" or has_groq:
+    if provider == "huggingface" or has_groq:
         try:
-            from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
-            return FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+            from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
+            hf_token = os.environ.get("HF_TOKEN", "hf_dummy")
+            return HuggingFaceInferenceAPIEmbeddings(
+                api_key=hf_token,
+                model_name="sentence-transformers/all-MiniLM-L6-v2"
+            )
         except Exception as e:
-            print(f"[embedder] FastEmbedEmbeddings fallback error: {e}")
+            print(f"[embedder] HuggingFaceInferenceAPIEmbeddings error: {e}")
+            try:
+                from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+                return FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+            except Exception:
+                pass
 
-    # Default to Ollama with automatic FastEmbed fallback
+    # Default to Ollama with automatic fallback
     try:
         from langchain_ollama import OllamaEmbeddings
         return OllamaEmbeddings(model="mxbai-embed-large")
