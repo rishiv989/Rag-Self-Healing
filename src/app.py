@@ -92,7 +92,12 @@ async def ask(request: QuestionRequest):
     """Stream a response for a given question using the self-healing RAG pipeline."""
     return StreamingResponse(
         run_langgraph_stream(request.question),
-        media_type="text/event-stream"
+        media_type="text/event-stream",
+        headers={
+            "X-Accel-Buffering": "no",      # Disable nginx proxy buffering on Render
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
     )
 
 

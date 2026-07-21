@@ -320,14 +320,14 @@ rag_graph = builder.compile()
 
 async def run_langgraph_stream(query: str):
     queue = asyncio.Queue()
-    # Flush HTTP 200 OK response headers immediately (<1ms) to bypass Render 30s proxy timeout
+    # Flush HTTP 200 OK + first SSE chunk immediately (<1ms) to bypass Render 30s proxy timeout
     await queue.put(f"data: {json.dumps({'type': 'node', 'current_node': 'analyze_query'})}\n\n")
 
     async def process_graph():
-        if global_state.llm is None or global_state.vectorstore is None:
-            from src.rag_engine import initialize_system
-            initialize_system()
         try:
+            if global_state.llm is None or global_state.vectorstore is None:
+                from src.rag_engine import initialize_system
+                initialize_system()
             await rag_graph.ainvoke({
                 "query": query,
                 "search_query": "",
@@ -346,13 +346,22 @@ async def run_langgraph_stream(query: str):
             })
         except Exception as e:
             print(f"Graph execution error: {e}")
+            import traceback
+            traceback.print_exc()
             await generate_sse(queue, "chunk", text=f"Error: {str(e)}")
             await queue.put("data: [DONE]\n\n")
 
     task = asyncio.create_task(process_graph())
+    # Yield control so the event loop sends the first SSE chunk to nginx immediately
+    await asyncio.sleep(0)
 
     while True:
-        chunk = await queue.get()
+        try:
+            chunk = await asyncio.wait_for(queue.get(), timeout=120.0)
+        except asyncio.TimeoutError:
+            print("[graph] SSE queue timeout — no response from graph after 120s")
+            await queue.put("data: [DONE]\n\n")
+            break
         yield chunk
         if chunk == "data: [DONE]\n\n":
             break
