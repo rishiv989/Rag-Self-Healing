@@ -1,12 +1,12 @@
 from langchain_experimental.text_splitter import SemanticChunker
-from src.embedder import _get_embeddings
 from src.loader import load_documents
 
-def split_documents(pdf_path):
+def split_documents(pdf_path, embeddings=None):
     docs = load_documents(pdf_path)
 
-    # Use the unified embedding model (Ollama for local, HuggingFace for cloud)
-    embeddings = _get_embeddings()
+    if embeddings is None:
+        from src.embedder import _get_embeddings
+        embeddings = _get_embeddings()
 
     # Semantic chunking relies on vector distance. 
     # The 'percentile' threshold forces a split when semantic distance between sentences is high.

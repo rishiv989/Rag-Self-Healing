@@ -1,7 +1,6 @@
 import os
 import chromadb
 from langchain_chroma import Chroma
-from src.splitter import split_documents
 
 CHROMA_DIR = "chroma_db"
 DATA_DIR = "Data"
@@ -34,11 +33,13 @@ def _get_embeddings():
 
 def create_vector_db(pdf_path):
     """Ingest a document and add its chunks into the shared ChromaDB collection."""
-    chunks = split_documents(pdf_path)
+    from src.splitter import split_documents
+    embeddings = _get_embeddings()
+    chunks = split_documents(pdf_path, embeddings=embeddings)
 
     vectorstore = Chroma.from_documents(
         documents=chunks,
-        embedding=_get_embeddings(),
+        embedding=embeddings,
         persist_directory=CHROMA_DIR
     )
 
