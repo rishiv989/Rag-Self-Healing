@@ -1,7 +1,6 @@
-from langchain_chroma import Chroma
 from rank_bm25 import BM25Okapi
 import os
-from src.embedder import _get_embeddings
+from src.embedder import _get_embeddings, get_or_create_vectorstore
 
 import src.state as state
 from src.reranker import Reranker
@@ -21,27 +20,20 @@ import asyncio
 
 MAX_HEAL_ATTEMPTS = 2
 
+
 def initialize_system():
     embeddings = _get_embeddings()
 
     if state.vectorstore is None:
-        state.vectorstore = Chroma(
-            persist_directory="chroma_db",
-            embedding_function=embeddings
-        )
-        
-        state.cache_store = Chroma(
-            collection_name="semantic_cache",
-            persist_directory="chroma_db",
-            embedding_function=embeddings
-        )
+        state.vectorstore = get_or_create_vectorstore()
+        state.cache_store = get_or_create_vectorstore()
 
         try:
             db = state.vectorstore.get()
-            state.ALL_DOCS = db["documents"]
-            state.ALL_METADATA = db["metadatas"]
+            state.ALL_DOCS = db.get("documents", []) or []
+            state.ALL_METADATA = db.get("metadatas", []) or []
         except Exception as e:
-            print(f"Error loading Chroma DB: {e}")
+            print(f"Error loading Vector DB: {e}")
             state.ALL_DOCS = []
             state.ALL_METADATA = []
 
@@ -96,7 +88,6 @@ async def ask_question_stream(query):
         yield "data: [DONE]\n\n"
         return
 
-    # Semantic Cache Check
     from src.semantic_cache import check_cache, store_in_cache
     cache_hit = check_cache(query)
     if cache_hit:
@@ -105,14 +96,12 @@ async def ask_question_stream(query):
         yield "data: [DONE]\n\n"
         return
 
-    # 1. Store mentions from raw query
     store_mentions(query)
     
     from src.query_processor import extract_entities
     if extract_entities(query):
         store_valid_entities(query)
 
-    # 2. Resolve pronoun using latest entity
     search_query = resolve_query(query, get_latest_entity())
 
     if search_query is None:
@@ -129,7 +118,6 @@ async def ask_question_stream(query):
         yield "data: [DONE]\n\n"
         return
 
-    # 3. Check if memory is relevant using the resolved query
     if memory_relevant(search_query):
         yield "data: " + json.dumps({'type': 'metadata', 'strategy': 'MEMORY', 'heals': 0, 'confidence': 1.0, 'sources': ['Conversation Memory']}) + "\n\n"
         memory_answer_text = ""
@@ -140,7 +128,6 @@ async def ask_question_stream(query):
             yield "data: [DONE]\n\n"
             return
 
-    # 4. Retrieval
     docs = await retrieve_documents(search_query)
 
     if not docs:
@@ -173,7 +160,6 @@ async def ask_question_stream(query):
             yield "data: [DONE]\n\n"
             return
 
-
         if strategy == "MMR":
             mmr_docs = await retrieve_documents(search_query, "mmr")
             ranked_docs = state.reranker.rerank(search_query, mmr_docs, top_k=3)
@@ -186,7 +172,6 @@ async def ask_question_stream(query):
     if hasattr(confidence, "item"):
         confidence = float(confidence.item())
 
-    # Get proper source tracking
     sources = []
     for doc in top_docs:
         source_name = doc.metadata.get("source", "Unknown Source")
@@ -208,9 +193,7 @@ async def ask_question_stream(query):
         
     draft_answer = "".join(draft_chunks)
 
-    # Run reflection in a thread so it doesn't block async loop
-    decision = await asyncio.to_thread(
-        state.reflection_agent.decide,
+    decision = await state.reflection_agent.decide_async(
         query=query,
         context=context,
         draft_answer=draft_answer,
