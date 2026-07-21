@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import "./App.css";
 
+const DIRECT_API_BASE = "https://rag-self-healing.onrender.com";
 const API_BASE = import.meta.env.VITE_API_BASE_URL
   ? import.meta.env.VITE_API_BASE_URL.replace(/\/$/, "")
   : window.location.hostname.includes("vercel.app")
@@ -168,9 +169,10 @@ function AnalyticsDashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const targetUrl = window.location.hostname.includes("vercel.app") ? DIRECT_API_BASE : API_BASE;
     Promise.all([
-      fetch(`${API_BASE}/analytics`).then((r) => r.json()),
-      fetch(`${API_BASE}/analytics/top-queries?top_k=8`).then((r) => r.json()),
+      fetch(`${targetUrl}/analytics`).then((r) => r.json()),
+      fetch(`${targetUrl}/analytics/top-queries?top_k=8`).then((r) => r.json()),
     ])
       .then(([analytics, queries]) => {
         setData(analytics);
@@ -291,9 +293,11 @@ function DocumentManager({ onUploadSuccess }) {
   const [deletingDoc, setDeletingDoc] = useState(null);
   const fileInputRef = useRef(null);
 
+  const getApiUrl = () => window.location.hostname.includes("vercel.app") ? DIRECT_API_BASE : API_BASE;
+
   const fetchDocs = useCallback(() => {
     setLoading(true);
-    fetch(`${API_BASE}/documents`)
+    fetch(`${getApiUrl()}/documents`)
       .then((r) => r.json())
       .then((data) => setDocuments(data.documents || []))
       .catch(() => setDocuments([]))
@@ -310,7 +314,7 @@ function DocumentManager({ onUploadSuccess }) {
     const formData = new FormData();
     formData.append("file", file);
     try {
-      const res = await fetch(`${API_BASE}/upload`, { method: "POST", body: formData });
+      const res = await fetch(`${getApiUrl()}/upload`, { method: "POST", body: formData });
       const data = await res.json();
       if (data.status === "success") {
         onUploadSuccess(data.message);
@@ -327,7 +331,7 @@ function DocumentManager({ onUploadSuccess }) {
   const handleDelete = async (docName) => {
     setDeletingDoc(docName);
     try {
-      const res = await fetch(`${API_BASE}/documents/${encodeURIComponent(docName)}`, {
+      const res = await fetch(`${getApiUrl()}/documents/${encodeURIComponent(docName)}`, {
         method: "DELETE",
       });
       const data = await res.json();
