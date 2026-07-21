@@ -23,10 +23,16 @@ Current user question:
         async for chunk in state.llm.astream(prompt):
             text = chunk.content if hasattr(chunk, "content") else str(chunk)
             yield text
+        return
     except Exception as e:
-        print(f"[generation] memory astream fallback: {e}")
+        print(f"[generation] memory astream error: {e}")
+
+    try:
         res = await state.llm.ainvoke(prompt)
         yield res.content if hasattr(res, "content") else str(res)
+    except Exception as e:
+        print(f"[generation] memory ainvoke error: {e}")
+        yield f"LLM Generation Error: {str(e)}"
 
 
 async def generate_answer_stream(context, query):
@@ -47,10 +53,16 @@ Do not list the sources at the end, just use the inline citations.
         async for chunk in state.llm.astream(prompt):
             text = chunk.content if hasattr(chunk, "content") else str(chunk)
             yield text
+        return
     except Exception as e:
-        print(f"[generation] generate_answer_stream astream fallback: {e}")
+        print(f"[generation] generate_answer_stream astream error: {e}")
+
+    try:
         res = await state.llm.ainvoke(prompt)
         yield res.content if hasattr(res, "content") else str(res)
+    except Exception as e:
+        print(f"[generation] generate_answer_stream ainvoke error: {e}")
+        yield f"LLM Generation Error: {str(e)}"
 
 
 async def correct_answer_stream(context, query, draft_answer):
@@ -68,7 +80,13 @@ Previous Weak Answer:
         async for chunk in state.llm.astream(prompt):
             text = chunk.content if hasattr(chunk, "content") else str(chunk)
             yield text
+        return
     except Exception as e:
-        print(f"[generation] correct_answer_stream astream fallback: {e}")
+        print(f"[generation] correct_answer_stream astream error: {e}")
+
+    try:
         res = await state.llm.ainvoke(prompt)
         yield res.content if hasattr(res, "content") else str(res)
+    except Exception as e:
+        print(f"[generation] correct_answer_stream ainvoke error: {e}")
+        yield f"LLM Generation Error: {str(e)}"
