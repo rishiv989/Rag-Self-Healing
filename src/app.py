@@ -12,10 +12,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import asyncio
 import gc
-from langchain_chroma import Chroma
 
 from src.graph import run_langgraph_stream
-from src.embedder import create_vector_db, list_ingested_documents, delete_document_collection, _get_embeddings
+from src.embedder import (
+    create_vector_db,
+    list_ingested_documents,
+    delete_document_collection,
+    get_or_create_vectorstore,
+    _get_embeddings
+)
 import src.state as global_state
 from rank_bm25 import BM25Okapi
 from src.models import (
@@ -67,13 +72,11 @@ def system_status():
     if os.environ.get("GROQ_API_KEY"):
         llm_name = f"{os.environ.get('GROQ_MODEL', 'llama-3.3-70b-versatile')} (Groq Cloud)"
 
-    vectorstore_exists = os.path.exists("chroma_db")
-
     return {
         "status": "ok",
         "total_chunks": docs_count,
-        "bm25_ready": global_state.bm25 is not None or vectorstore_exists,
-        "vectorstore_ready": global_state.vectorstore is not None or vectorstore_exists,
+        "bm25_ready": global_state.bm25 is not None,
+        "vectorstore_ready": global_state.vectorstore is not None,
         "llm_model": llm_name,
         "embedding_model": "FastCloudEmbeddings (Cloud)" if os.environ.get("GROQ_API_KEY") else "mxbai-embed-large (Local)",
         "documents_ingested": len(ingested),
@@ -134,15 +137,8 @@ async def upload_document(file: UploadFile = File(...)):
         chunks = split_documents(file_path, embeddings=embeddings)
         count = len(chunks)
 
-        if global_state.vectorstore is not None:
-            global_state.vectorstore.add_documents(chunks)
-        else:
-            global_state.vectorstore = Chroma(
-                collection_name="langchain",
-                embedding_function=embeddings,
-                persist_directory="chroma_db"
-            )
-            global_state.vectorstore.add_documents(chunks)
+        vectorstore = get_or_create_vectorstore()
+        vectorstore.add_documents(chunks)
 
         new_docs = [c.page_content for c in chunks]
         new_meta = [c.metadata for c in chunks]

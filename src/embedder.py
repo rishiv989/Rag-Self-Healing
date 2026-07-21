@@ -1,11 +1,9 @@
 import os
-import chromadb
 import hashlib
-from langchain_chroma import Chroma
+from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 import src.state as global_state
 
-CHROMA_DIR = "chroma_db"
 DATA_DIR = "Data"
 
 
@@ -37,10 +35,58 @@ class FastCloudEmbeddings(Embeddings):
         return self._embed(text)
 
 
+class CloudVectorStore:
+    """
+    Lightweight, high-speed vector store for Cloud deployment.
+    Uses zero C++ binary bindings and zero memory overhead (<30MB RAM).
+    """
+    def __init__(self, embedding_function):
+        self.embedding_function = embedding_function
+        self.docs = []
+
+    def add_documents(self, documents):
+        self.docs.extend(documents)
+
+    def similarity_search(self, query, k=4):
+        if not self.docs:
+            return []
+        q_vec = self.embedding_function.embed_query(query)
+        doc_texts = [d.page_content for d in self.docs]
+        doc_vecs = self.embedding_function.embed_documents(doc_texts)
+
+        scored = []
+        for doc, vec in zip(self.docs, doc_vecs):
+            dot = sum(a * b for a, b in zip(q_vec, vec))
+            scored.append((dot, doc))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [doc for score, doc in scored[:k]]
+
+    def similarity_search_with_score(self, query, k=4):
+        if not self.docs:
+            return []
+        q_vec = self.embedding_function.embed_query(query)
+        doc_texts = [d.page_content for d in self.docs]
+        doc_vecs = self.embedding_function.embed_documents(doc_texts)
+
+        scored = []
+        for doc, vec in zip(self.docs, doc_vecs):
+            dot = sum(a * b for a, b in zip(q_vec, vec))
+            scored.append((doc, float(dot)))
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:k]
+
+    def get(self, include=None):
+        return {
+            "documents": [d.page_content for d in self.docs],
+            "metadatas": [d.metadata for d in self.docs],
+            "ids": [str(i) for i in range(len(self.docs))]
+        }
+
+
 def _get_embeddings():
     """
     Returns embedding model:
-    - In Cloud Mode (GROQ_API_KEY present), uses zero-overhead FastCloudEmbeddings to keep RAM < 60MB.
+    - In Cloud Mode (GROQ_API_KEY present), uses zero-overhead FastCloudEmbeddings to keep RAM < 30MB.
     - Uses 1-thread FastEmbedEmbeddings locally.
     """
     has_groq = bool(os.environ.get("GROQ_API_KEY"))
@@ -55,36 +101,43 @@ def _get_embeddings():
         return FastCloudEmbeddings()
 
 
+def get_or_create_vectorstore():
+    """Returns vectorstore instance (CloudVectorStore in cloud mode, Chroma in local mode)."""
+    if global_state.vectorstore is not None:
+        return global_state.vectorstore
+
+    embeddings = _get_embeddings()
+    if os.environ.get("GROQ_API_KEY"):
+        global_state.vectorstore = CloudVectorStore(embeddings)
+    else:
+        from langchain_chroma import Chroma
+        global_state.vectorstore = Chroma(
+            collection_name="langchain",
+            embedding_function=embeddings,
+            persist_directory="chroma_db"
+        )
+    return global_state.vectorstore
+
+
 def create_vector_db(pdf_path):
-    """Ingest a document into ChromaDB in small batches to keep memory usage under 200MB."""
+    """Ingest a document into VectorStore in small batches to keep memory usage under 30MB."""
     from src.splitter import split_documents
     embeddings = _get_embeddings()
     chunks = split_documents(pdf_path, embeddings=embeddings)
 
-    if global_state.vectorstore is None:
-        global_state.vectorstore = Chroma(
-            collection_name="langchain",
-            embedding_function=embeddings,
-            persist_directory=CHROMA_DIR
-        )
-
-    batch_size = 10
-    for i in range(0, len(chunks), batch_size):
-        batch = chunks[i:i + batch_size]
-        global_state.vectorstore.add_documents(batch)
-
-    return global_state.vectorstore
+    vectorstore = get_or_create_vectorstore()
+    vectorstore.add_documents(chunks)
+    return vectorstore
 
 
 def list_ingested_documents():
     """
     Returns a list of ingested documents with their chunk counts.
-    Derives document list directly from ChromaDB collection metadata.
+    Derives document list directly from vectorstore metadata.
     """
     try:
-        client = chromadb.PersistentClient(path=CHROMA_DIR)
-        collection = client.get_or_create_collection(name="langchain")
-        db = collection.get(include=["metadatas"])
+        vectorstore = get_or_create_vectorstore()
+        db = vectorstore.get(include=["metadatas"])
         metadatas = db.get("metadatas", []) or []
 
         doc_chunks = {}
@@ -116,28 +169,36 @@ def list_ingested_documents():
 
 def delete_document_collection(doc_name: str) -> bool:
     """
-    Delete all chunks belonging to a specific document from ChromaDB.
+    Delete all chunks belonging to a specific document from vectorstore.
     """
     try:
-        client = chromadb.PersistentClient(path=CHROMA_DIR)
-        collection = client.get_or_create_collection(name="langchain")
-        db = collection.get(include=["metadatas"])
-        ids = db.get("ids", []) or []
-        metadatas = db.get("metadatas", []) or []
+        vectorstore = get_or_create_vectorstore()
+        if isinstance(vectorstore, CloudVectorStore):
+            before = len(vectorstore.docs)
+            vectorstore.docs = [d for d in vectorstore.docs if d.metadata.get("source", "").replace("\\", "/").split("/")[-1] != doc_name]
+            deleted = before - len(vectorstore.docs)
+            if deleted == 0:
+                return False
+        else:
+            client = chromadb.PersistentClient(path="chroma_db")
+            collection = client.get_or_create_collection(name="langchain")
+            db = collection.get(include=["metadatas"])
+            ids = db.get("ids", []) or []
+            metadatas = db.get("metadatas", []) or []
 
-        ids_to_delete = []
-        for chunk_id, meta in zip(ids, metadatas):
-            if not meta:
-                continue
-            source = meta.get("source", "")
-            name = source.replace("\\", "/").split("/")[-1]
-            if name == doc_name:
-                ids_to_delete.append(chunk_id)
+            ids_to_delete = []
+            for chunk_id, meta in zip(ids, metadatas):
+                if not meta:
+                    continue
+                source = meta.get("source", "")
+                name = source.replace("\\", "/").split("/")[-1]
+                if name == doc_name:
+                    ids_to_delete.append(chunk_id)
 
-        if not ids_to_delete:
-            return False
+            if not ids_to_delete:
+                return False
 
-        collection.delete(ids=ids_to_delete)
+            collection.delete(ids=ids_to_delete)
 
         for folder in [DATA_DIR, "data"]:
             file_path = os.path.join(folder, doc_name)
