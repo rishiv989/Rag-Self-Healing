@@ -13,10 +13,8 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source code and initial data
+# Copy source code
 COPY src/ ./src/
-COPY Data/ ./Data/
-COPY chroma_db/ ./chroma_db/
 
 # Create working directories
 RUN mkdir -p chroma_db logs Data && chmod -R 777 chroma_db logs Data
