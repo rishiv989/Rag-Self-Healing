@@ -14,7 +14,7 @@ from src.adaptive_healing import adaptive_decision
 from src.memory import store_mentions, store_valid_entities, get_latest_entity, memory_relevant
 from src.query_processor import resolve_query, is_ambiguous_multi_entity
 from src.retrieval import retrieve_documents
-from src.generation import generate_memory_answer_stream, generate_answer_stream, correct_answer_stream
+from src.generation import generate_memory_answer_stream, generate_answer_stream, correct_answer_stream, generate_general_knowledge_stream, answer_not_in_document
 import json
 import asyncio
 
@@ -221,6 +221,17 @@ async def ask_question_stream(query):
             yield "data: " + json.dumps({'type': 'chunk', 'text': chunk}) + "\n\n"
 
         draft_answer = "".join(draft_chunks)
+
+        # ── General Knowledge Fallback ─────────────────────────────────────
+        # If the document-grounded draft says 'not mentioned / not in document',
+        # discard it and answer from the LLM's own training knowledge instead.
+        if answer_not_in_document(draft_answer):
+            yield f"data: {json.dumps({'type': 'node', 'current_node': 'web_search_fallback'})}\n\n"
+            yield "data: " + json.dumps({'type': 'metadata', 'strategy': 'GENERAL_KNOWLEDGE', 'heals': heal_attempts, 'confidence': 0.5, 'sources': ['LLM General Knowledge']}) + "\n\n"
+            async for chunk in generate_general_knowledge_stream(query):
+                yield "data: " + json.dumps({'type': 'chunk', 'text': chunk}) + "\n\n"
+            yield "data: [DONE]\n\n"
+            return
 
         # ── Reflect ────────────────────────────────────────────────────────
         yield f"data: {json.dumps({'type': 'node', 'current_node': 'reflect'})}\n\n"
