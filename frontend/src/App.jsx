@@ -311,6 +311,9 @@ function DocumentManager({ onUploadSuccess }) {
   const handleUpload = async (file) => {
     if (!file) return;
     setUploading(true);
+    // Wake up Render free tier container if sleeping
+    try { await fetch(`${getApiUrl()}/health`); } catch {}
+
     const formData = new FormData();
     formData.append("file", file);
     try {
