@@ -9,28 +9,26 @@ DATA_DIR = "Data"
 def _get_embeddings():
     """
     Returns embedding model:
-    - If GROQ_API_KEY or EMBEDDING_PROVIDER == 'huggingface' or Ollama is unavailable, uses HuggingFaceEmbeddings.
-      Defaults to 'sentence-transformers/all-MiniLM-L6-v2' (90MB lightweight model) for 512MB RAM free tiers like Render.
+    - If GROQ_API_KEY is present or EMBEDDING_PROVIDER == 'fastembed', uses FastEmbedEmbeddings (ONNX Runtime, 25MB RAM).
     - Otherwise uses local OllamaEmbeddings(model='mxbai-embed-large').
     """
     provider = os.environ.get("EMBEDDING_PROVIDER", "").lower()
     has_groq = bool(os.environ.get("GROQ_API_KEY"))
-    cloud_model = os.environ.get("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 
-    if provider == "huggingface" or has_groq:
+    if provider == "fastembed" or has_groq:
         try:
-            from langchain_huggingface import HuggingFaceEmbeddings
-            return HuggingFaceEmbeddings(model_name=cloud_model)
+            from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+            return FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
         except Exception as e:
-            print(f"[embedder] HuggingFaceEmbeddings fallback error: {e}")
+            print(f"[embedder] FastEmbedEmbeddings fallback error: {e}")
 
-    # Default to Ollama with automatic HuggingFace fallback
+    # Default to Ollama with automatic FastEmbed fallback
     try:
         from langchain_ollama import OllamaEmbeddings
         return OllamaEmbeddings(model="mxbai-embed-large")
     except Exception:
-        from langchain_huggingface import HuggingFaceEmbeddings
-        return HuggingFaceEmbeddings(model_name=cloud_model)
+        from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+        return FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
 
 
 def create_vector_db(pdf_path):
