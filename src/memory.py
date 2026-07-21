@@ -47,6 +47,21 @@ def memory_relevant(query):
     if is_broad_query(query):
         return False
 
+    # Only use memory when the query explicitly references a pronoun (he/she/it/they)
+    # OR a known entity that was previously mentioned.
+    # This prevents the cloud reranker's constant score=1.0 from triggering memory
+    # on generic knowledge questions like "what is software development?".
+    from src.query_processor import has_pronoun, extract_entities
+    known_entities = [e.lower() for e in state.entity_memory.get("recent_entities", [])]
+
+    has_reference = has_pronoun(query)
+    if not has_reference and known_entities:
+        query_lower = query.lower()
+        has_reference = any(entity in query_lower for entity in known_entities)
+
+    if not has_reference:
+        return False
+
     latest_answer = state.chat_history[-1]["assistant"]
 
     pseudo_doc = Document(

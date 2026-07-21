@@ -32,6 +32,26 @@ BROAD_QUERY_PREFIXES = [
     "tell me about"
 ]
 
+# Regex patterns for definitional / general-knowledge questions that should
+# NEVER be answered from conversation memory — always go to RAG instead.
+DEFINITIONAL_PATTERNS = [
+    r"^what is\b",
+    r"^what are\b",
+    r"^what does\b",
+    r"^what do\b",
+    r"^what was\b",
+    r"^what were\b",
+    r"^what is meant by\b",
+    r"^what's\b",
+    r"^how does\b",
+    r"^how do\b",
+    r"^how is\b",
+    r"^how are\b",
+    r"^define\b",
+    r"^meaning of\b",
+]
+
+
 AMBIGUOUS_WORDS = {
     "better",
     "more",
@@ -135,6 +155,10 @@ def is_broad_query(query):
 
     for prefix in BROAD_QUERY_PREFIXES:
         if query_lower.startswith(prefix):
+            return True
+
+    for pattern in DEFINITIONAL_PATTERNS:
+        if re.match(pattern, query_lower):
             return True
 
     return False
